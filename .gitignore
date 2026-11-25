@@ -9,3 +9,6 @@ __pycache__/
 # 本地配置（含令牌），模板见 config.example.yaml
 config.yaml
 .env
+
+# 编辑器临时文件
+*.dsh-remote-edit-*.tmp
