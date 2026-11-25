@@ -49,6 +49,16 @@ _TEMPLATE = """<!doctype html>
   td a { color:var(--blue); text-decoration:none; }
   .tag { display:inline-block; background:#eef2fb; color:#4160a8; border-radius:5px;
          font-size:11px; padding:1px 7px; margin:0 4px 2px 0; }
+  .kwcloud { min-height:120px; line-height:2.1; padding:6px 2px; }
+  .kwcloud span { display:inline-block; margin:0 9px 6px 0; color:var(--blue); }
+  .ins-list { max-height:360px; overflow:auto; font-size:13px; }
+  .ins-item { padding:8px 0; border-bottom:1px solid #f1f3f8; line-height:1.7; }
+  .ins-item:last-child { border-bottom:0; }
+  .ins-item .m { color:var(--muted); font-size:12px; }
+  .senti { display:inline-block; border-radius:5px; font-size:11px; padding:1px 7px; margin-right:6px; }
+  .senti.positive { background:#e8f7ee; color:#1a7f37; }
+  .senti.negative { background:#fdecec; color:#b42318; }
+  .senti.neutral { background:#eef2fb; color:#4160a8; }
   footer { margin-top:34px; color:var(--muted); font-size:12px; text-align:center; line-height:1.8; }
   .login { max-width:360px; margin:80px auto; background:#fff; border:1px solid var(--line);
            border-radius:12px; padding:26px; }
@@ -102,6 +112,16 @@ _TEMPLATE = """<!doctype html>
     <div class="panel"><h3>被引最高的引用论文</h3><table id="tbl-papers"></table></div>
   </section>
 
+  <section class="block" id="sec-insights" hidden>
+    <h2>数据用途与评价 <span class="muted" id="ins-meta"></span></h2>
+    <div class="grid2">
+      <div class="panel"><h3>数据用途分布</h3><div id="ch-roles" class="chart"></div></div>
+      <div class="panel"><h3>技术关键词（字号 = 出现论文数）</h3><div id="kwcloud" class="kwcloud"></div></div>
+    </div>
+    <div class="panel"><h3>论文中的具体使用方式</h3><div id="usage-list" class="ins-list"></div></div>
+    <div class="panel"><h3>他人评价</h3><div id="cmt-list" class="ins-list"></div></div>
+  </section>
+
   <section class="block" id="sec-github" hidden>
     <h2>GitHub <a id="gh-link" target="_blank" rel="noopener">仓库主页 ↗</a></h2>
     <div class="panel" id="gh-panel" hidden><h3>Stars 趋势</h3><div id="ch-gh" class="chart"></div></div>
@@ -129,6 +149,13 @@ const AUTH = __AUTH__;
 const TOKEN_KEY = 'anystats_token';
 const AFF = {university:'高校', institute:'科研院所', company:'企业', personal:'个人', other:'其他'};
 const COLORS = ['#2456e6', '#00a887', '#f2994a', '#9b51e0', '#eb5757', '#2d9cdb'];
+const ROLE_LABELS = {
+  training_data: '训练集', base_data: '基础数据/二次构建', finetune_data: '微调数据',
+  benchmark: '评测基准', comparison_baseline: '对比基线',
+  related_work: '相关工作提及', concept_reference: '概念参考',
+  extension: '直接扩展', other: '其他'
+};
+const SENTI_LABELS = {positive: '正面', negative: '负面', neutral: '中性'};
 
 function token() { return localStorage.getItem(TOKEN_KEY) || ''; }
 function fmt(n) { return (n === null || n === undefined) ? '—' : Number(n).toLocaleString('zh-CN'); }
@@ -196,6 +223,10 @@ function renderCards(data) {
   if (o.github) {
     cards.push({k: 'GitHub Stars', v: o.github.stars, h: o.github.repo});
     cards.push({k: 'Forks', v: o.github.forks});
+  }
+  if (o.insights) {
+    cards.push({k: '已做全文分析', v: o.insights.analyzed,
+                h: '他人评价 ' + fmt(o.insights.comments) + ' 条'});
   }
   const rows = cards.filter(function (c) { return c.v !== null && c.v !== undefined; });
   document.getElementById('cards').innerHTML = rows.map(function (c) {
@@ -317,6 +348,56 @@ function renderPapers(data) {
   document.getElementById('tbl-papers').innerHTML =
     '<thead><tr><th>标题 / 作者</th><th>年份</th><th>期刊 / 会议</th><th>被引</th></tr></thead>' +
     '<tbody>' + (rows.join('') || '<tr><td colspan="4" class="empty">暂无数据</td></tr>') + '</tbody>';
+}
+
+function renderInsights(data) {
+  const ins = data.insights;
+  const sec = document.getElementById('sec-insights');
+  if (!ins || !ins.analyzed) { sec.hidden = true; return; }
+  sec.hidden = false;
+  document.getElementById('ins-meta').textContent =
+    '已分析 ' + ins.analyzed + ' 篇 · 评价 ' + (ins.comments || []).length + ' 条';
+
+  const roles = (ins.roles || []).slice().sort(function (a, b) { return a.count - b.count; });
+  if (roles.length) {
+    plot('ch-roles', [{
+      type: 'bar', orientation: 'h', marker: {color: '#00a887'},
+      y: roles.map(function (x) { return ROLE_LABELS[x.role] || x.role; }),
+      x: roles.map(function (x) { return x.count; }),
+      hovertemplate: '%{y}<br>%{x} 篇<extra></extra>'
+    }], {margin: {l: 150, r: 20, t: 8, b: 36},
+      xaxis: Object.assign({}, countAxis(roles.map(function (x) { return x.count; })))});
+  } else {
+    document.getElementById('ch-roles').innerHTML = '<div class="empty">暂无数据</div>';
+  }
+
+  const kws = (ins.keywords || []).slice(0, 30);
+  const maxCount = Math.max.apply(null, kws.map(function (k) { return k.count; }).concat([1]));
+  document.getElementById('kwcloud').innerHTML = kws.length ? kws.map(function (k) {
+    const size = 12 + Math.round(10 * k.count / maxCount);
+    return '<span style="font-size:' + size + 'px" title="' + k.count + ' 篇">' +
+      esc(k.keyword) + '</span>';
+  }).join('') : '<div class="empty">暂无数据</div>';
+
+  const usages = ins.usages || [];
+  document.getElementById('usage-list').innerHTML = usages.length ? usages.map(function (u) {
+    const title = u.url
+      ? '<a href="' + esc(u.url) + '" target="_blank" rel="noopener">' + esc(u.title) + '</a>'
+      : esc(u.title);
+    return '<div class="ins-item"><div class="m">' + esc(u.year || '') + ' · ' + title + '</div>' +
+      '<div>' + esc(u.usage) + '</div></div>';
+  }).join('') : '<div class="empty">暂无具体使用方式</div>';
+
+  const icons = {positive: '👍', negative: '⚠️', neutral: '💬'};
+  const comments = ins.comments || [];
+  document.getElementById('cmt-list').innerHTML = comments.length ? comments.map(function (c) {
+    const title = c.url
+      ? '<a href="' + esc(c.url) + '" target="_blank" rel="noopener">' + esc(c.title) + '</a>'
+      : esc(c.title);
+    return '<div class="ins-item"><span class="senti ' + esc(c.sentiment) + '">' +
+      (icons[c.sentiment] || '💬') + ' ' + (SENTI_LABELS[c.sentiment] || '中性') + '</span>' +
+      '<span class="m">' + title + '</span><div>' + esc(c.text) + '</div></div>';
+  }).join('') : '<div class="empty">暂无评价</div>';
 }
 
 function renderGithub(data) {
@@ -462,6 +543,7 @@ function render(data) {
   renderCards(data);
   renderDownloads(data);
   renderPapers(data);
+  renderInsights(data);
   renderGithub(data);
   renderCommunity(data);
 }

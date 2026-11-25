@@ -61,6 +61,16 @@ sources:
     arxiv_id: ""         # 种子论文 arXiv ID（如 2511.17441），统计引用它的论文
     # 匿名访问 Semantic Scholar 是共享 IP 池，容易 429；建议配置令牌（免费申请）
     s2_api_key: ""       # 也可用环境变量 S2_API_KEY；真实令牌请写在 config.yaml
+    # 可选：论文全文分析（MinerU 解析 + 大模型抽取 数据用途/评价/关键词）
+    insights:
+      enabled: false
+      project_keyword: ""      # 在全文中搜索的项目名（启用时必填，如 MyProject）
+      mineru_token: ""         # 也可用环境变量 MINERU_TOKEN
+      llm_api_key: ""          # 也可用环境变量 DEEPSEEK_API_KEY
+      llm_base: "https://api.deepseek.com"
+      llm_model: "deepseek-v4-flash"
+      cache_dir: "data/mineru" # markdown 缓存，避免重复调用 MinerU
+      max_papers_per_run: 5    # 每轮最多分析几篇新论文
   github:
     enabled: true
     repo: ""             # owner/name，如 FlagOpen/RoboCOIN

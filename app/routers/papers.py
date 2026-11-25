@@ -24,6 +24,12 @@ def list_papers(
     return ok({"items": items, "total": total, "page": page, "page_size": page_size})
 
 
+@router.get("/insights")
+def papers_insights(conn: Connection = Depends(get_db)):
+    """数据用途 / 他人评价 / 关键词（MinerU + 大模型分析结果）。"""
+    return ok(crud.papers.insights_summary(conn))
+
+
 @router.get("/stats")
 def papers_stats(conn: Connection = Depends(get_db)):
     """学术影响统计：引用数、按年份、期刊、Top 被引。"""

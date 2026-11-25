@@ -1,6 +1,7 @@
 """论文引用（Semantic Scholar）的写入与统计。"""
 
 import json
+from collections import Counter
 from datetime import datetime, timezone
 from sqlite3 import Connection
 from typing import Optional
@@ -124,6 +125,74 @@ def list_papers(
         )
         items.append(item)
     return items, total
+
+
+def insights_summary(conn: Connection, *, limit: int = 300) -> dict:
+    """数据用途 / 他人评价 / 关键词聚合（来自 MinerU + 大模型分析）。"""
+    rows = conn.execute(
+        """SELECT pi.arxiv_id, pi.role, pi.usage, pi.keywords_json, pi.comments_json,
+                  p.title, p.year
+           FROM paper_insights pi
+           JOIN papers p ON p.s2_id = pi.s2_id
+           ORDER BY COALESCE(p.year, 0) DESC, pi.analyzed_at DESC"""
+    ).fetchall()
+    roles: Counter = Counter()
+    keywords: Counter = Counter()
+    usages: list[dict] = []
+    comments: list[dict] = []
+    for row in rows:
+        if row["role"]:
+            roles[row["role"]] += 1
+        url = f"https://arxiv.org/abs/{row['arxiv_id']}" if row["arxiv_id"] else None
+        if row["usage"]:
+            usages.append(
+                {
+                    "title": row["title"],
+                    "arxiv_id": row["arxiv_id"],
+                    "year": row["year"],
+                    "url": url,
+                    "usage": row["usage"],
+                }
+            )
+        try:
+            row_keywords = json.loads(row["keywords_json"] or "[]")
+        except Exception:
+            row_keywords = []
+        for keyword in row_keywords:
+            if isinstance(keyword, str) and keyword.strip():
+                keywords[keyword.strip().lower()] += 1
+        try:
+            row_comments = json.loads(row["comments_json"] or "[]")
+        except Exception:
+            row_comments = []
+        for comment in row_comments:
+            if not isinstance(comment, dict) or not comment.get("text"):
+                continue
+            sentiment = comment.get("sentiment") or "neutral"
+            if sentiment not in ("positive", "neutral", "negative"):
+                sentiment = "neutral"
+            comments.append(
+                {
+                    "title": row["title"],
+                    "arxiv_id": row["arxiv_id"],
+                    "year": row["year"],
+                    "url": url,
+                    "text": comment["text"],
+                    "sentiment": sentiment,
+                }
+            )
+    sentiments: Counter = Counter(item["sentiment"] for item in comments)
+    return {
+        "analyzed": len(rows),
+        "roles": [{"role": role, "count": count} for role, count in roles.most_common()],
+        "keywords": [
+            {"keyword": keyword, "count": count}
+            for keyword, count in keywords.most_common(40)
+        ],
+        "usages": usages[:limit],
+        "comments": comments[:limit],
+        "sentiments": dict(sentiments),
+    }
 
 
 def stats_summary(conn: Connection) -> dict:

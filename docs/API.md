@@ -127,6 +127,26 @@
 }
 ```
 
+### GET /api/v1/papers/insights
+
+来自 MinerU 全文解析 + 大模型抽取（`paper_insights` 表）：数据用途分布、具体使用方式、他人评价（带情感）、技术关键词。未配置 `paper.insights` 时返回空结构。
+
+```json
+{
+  "analyzed": 12,
+  "roles": [{"role": "training_data", "count": 6}],
+  "keywords": [{"keyword": "vla", "count": 8}],
+  "usages": [{"title": "...", "arxiv_id": "2601.00001", "year": 2026,
+              "url": "https://arxiv.org/abs/2601.00001",
+              "usage": "一句话概括论文具体如何使用本项目"}],
+  "comments": [{"title": "...", "text": "论文评价原文", "sentiment": "positive"}],
+  "sentiments": {"positive": 3, "negative": 1, "neutral": 2}
+}
+```
+
+- `role`：`training_data` / `base_data` / `finetune_data` / `benchmark` / `comparison_baseline` / `related_work` / `concept_reference` / `extension` / `other`
+- `comments[].sentiment`：`positive` / `neutral` / `negative`
+
 ## GitHub
 
 ### GET /api/v1/github

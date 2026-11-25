@@ -56,6 +56,20 @@ CREATE TABLE IF NOT EXISTS papers (
 );
 CREATE INDEX IF NOT EXISTS idx_papers_year ON papers(year);
 
+-- 论文全文分析结果（MinerU + 大模型）：数据用途 / 评价 / 关键词
+CREATE TABLE IF NOT EXISTS paper_insights (
+    s2_id TEXT PRIMARY KEY,
+    arxiv_id TEXT,
+    role TEXT,
+    usage TEXT,
+    keywords_json TEXT,
+    comments_json TEXT,
+    md_path TEXT,
+    analyzed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    model TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_paper_insights_role ON paper_insights(role);
+
 -- 每日论文快照：种子论文被引 / 引用论文数 / 引用论文总被引
 CREATE TABLE IF NOT EXISTS paper_snapshots (
     date TEXT PRIMARY KEY,

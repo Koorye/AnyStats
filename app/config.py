@@ -135,6 +135,19 @@ class Settings:
             arxiv_id=str(paper.get("arxiv_id") or "").strip(),
             s2_api_key=str(_env("S2_API_KEY", paper.get("s2_api_key") or "")),
         )
+        insights = copy.deepcopy(paper.get("insights") or {})
+        paper["insights"] = {
+            "enabled": _as_bool(insights.get("enabled"), False),
+            "project_keyword": str(insights.get("project_keyword") or ""),
+            "mineru_token": str(_env("MINERU_TOKEN", insights.get("mineru_token") or "")),
+            "llm_api_key": str(_env("DEEPSEEK_API_KEY", insights.get("llm_api_key") or "")),
+            "llm_base": str(_env("DEEPSEEK_BASE", insights.get("llm_base")
+                                 or "https://api.deepseek.com")).rstrip("/"),
+            "llm_model": str(_env("DEEPSEEK_MODEL", insights.get("llm_model")
+                                  or "deepseek-v4-flash")),
+            "cache_dir": str(insights.get("cache_dir") or "data/mineru"),
+            "max_papers_per_run": int(insights.get("max_papers_per_run") or 5),
+        }
         github.update(
             enabled=_as_bool(github.get("enabled"), True),
             repo=str(github.get("repo") or "").strip(),
@@ -165,6 +178,12 @@ class Settings:
 
     def active_sources(self) -> list[str]:
         return [name for name in self.SOURCES if self.source_active(name)]
+
+    def insights_active(self) -> bool:
+        """全文用途/评价分析是否可用（启用 + 项目名 + 大模型 key）。"""
+        cfg = (self.SOURCES.get("paper") or {}).get("insights") or {}
+        return bool(self.source_active("paper") and cfg.get("enabled")
+                    and cfg.get("project_keyword") and cfg.get("llm_api_key"))
 
     def public_info(self) -> dict:
         """给前端的安全配置（不含令牌）。"""

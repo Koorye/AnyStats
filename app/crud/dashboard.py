@@ -135,12 +135,18 @@ def compute_dashboard(conn: Connection, *, trend_days: int = 30) -> dict:
             include_prs=bool(gh_cfg.get("include_prs")),
         )
     paper_stats = papers.stats_summary(conn) if settings.source_active("paper") else None
+    insights = papers.insights_summary(conn) if settings.insights_active() else None
     overview = _overview(conn)
     if paper_stats is not None:
         overview["paper"] = {
             "citing_papers": paper_stats["citing_papers"],
             "citing_citations": paper_stats["citing_citations"],
             "seed_citations": (paper_stats.get("seed") or {}).get("citation_count", 0),
+        }
+    if insights is not None:
+        overview["insights"] = {
+            "analyzed": insights["analyzed"],
+            "comments": len(insights["comments"]),
         }
     if gh is not None:
         overview["github"] = {
@@ -149,6 +155,12 @@ def compute_dashboard(conn: Connection, *, trend_days: int = 30) -> dict:
             "forks": gh["forks"],
             "open_issues": gh["open_issues"],
         }
+    features = _active_sources(conn)
+    features["insights"] = {
+        "label": "数据用途/评价",
+        "active": settings.insights_active(),
+        "has_data": bool(insights and insights["analyzed"]),
+    }
     return {
         "site": settings.public_info(),
         "overview": overview,
@@ -163,7 +175,8 @@ def compute_dashboard(conn: Connection, *, trend_days: int = 30) -> dict:
         "country_names": {code: COUNTRY_NAMES.get(code, code) for code in COUNTRY_NAMES},
         "org_tree": _org_tree(conn),
         "papers": paper_stats,
+        "insights": insights,
         "github": gh,
-        "features": _active_sources(conn),
+        "features": features,
         "computed_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }

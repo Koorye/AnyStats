@@ -84,6 +84,44 @@ def test_papers_section(client, monkeypatch):
     assert dash["features"]["paper"]["has_data"] is True
 
 
+def test_paper_insights_section(client, monkeypatch):
+    monkeypatch.setitem(config.settings.SOURCES["paper"], "enabled", True)
+    monkeypatch.setitem(config.settings.SOURCES["paper"], "arxiv_id", "2511.17441")
+    monkeypatch.setitem(
+        config.settings.SOURCES["paper"], "insights",
+        {"enabled": True, "llm_api_key": "test-key", "project_keyword": "MyProject"},
+    )
+    conn = connect()
+    papers.upsert_paper(conn, {
+        "s2_id": "p3", "title": "Using MyProject", "authors": ["X"],
+        "year": 2026, "venue": "CoRL", "citation_count": 2, "arxiv_id": "2601.00001",
+    })
+    conn.execute(
+        """INSERT INTO paper_insights
+               (s2_id, arxiv_id, role, usage, keywords_json, comments_json,
+                analyzed_at, model)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            "p3", "2601.00001", "training_data", "用 MyProject 训练 VLA 策略",
+            '["vla", "bimanual manipulation"]',
+            '[{"text": "MyProject is diverse.", "sentiment": "positive"}]',
+            "2026-01-01T00:00:00Z", "test",
+        ),
+    )
+    conn.commit()
+
+    data = client.get("/api/v1/papers/insights").json()["data"]
+    assert data["analyzed"] == 1
+    assert data["roles"] == [{"role": "training_data", "count": 1}]
+    assert data["comments"][0]["sentiment"] == "positive"
+    assert data["usages"][0]["usage"] == "用 MyProject 训练 VLA 策略"
+    assert data["sentiments"] == {"positive": 1}
+
+    dash = client.get("/api/v1/dashboard").json()["data"]
+    assert dash["features"]["insights"]["has_data"] is True
+    assert dash["overview"]["insights"]["analyzed"] == 1
+
+
 def test_github_section(client, monkeypatch):
     monkeypatch.setitem(config.settings.SOURCES["github"], "enabled", True)
     monkeypatch.setitem(config.settings.SOURCES["github"], "repo", "o/r")

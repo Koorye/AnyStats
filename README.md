@@ -1,10 +1,12 @@
 # AnyStats
 
 适用于任意开源项目 / 数据集 / 论文的**通用数据统计服务**：一个 `config.yaml` + 一条 `./start.sh`，即可得到
-使用登记表单、公开统计面板、每日自动采集（HuggingFace / ModelScope 下载量、论文引用、GitHub 仓库指标）。
+使用登记表单、公开统计面板、每日自动采集（HuggingFace / ModelScope 下载量、论文引用、GitHub 仓库指标），
+以及可选的**论文全文分析**（MinerU 解析 PDF + 大模型抽取数据用途 / 他人评价 / 关键词）。
 
 - **零改造复用**：项目名、组织、论文、GitHub 仓库全部在 `config.yaml` 中配置，不写死任何项目
 - **一键启动**：自动创建虚拟环境、安装依赖、启动 Web 与内置每日采集线程，无需 cron / tmux / systemd
+- **可持续的论文洞察**：可选接入 MinerU + 大模型（OpenAI 兼容接口），增量抽取论文如何使用本项目、如何评价本项目
 - **手工登记驱动的人群统计**：世界地图、国家分布、登记趋势、单位分布全部来自 `/submit` 表单，不做访问 IP 采集
 - **按需启用数据源**：没配置的源自动跳过，面板对应板块自动隐藏
 - **本地可视化**：Plotly 随包提供，无 CDN / 外网依赖；SQLite 单文件，备份即拷贝
@@ -186,6 +188,15 @@ sources:
     enabled: true
     arxiv_id: ""                   # 种子论文 arXiv ID，统计引用它的论文
     s2_api_key: ""                 # 也叫 S2_API_KEY；真实令牌写 config.yaml（不入库）
+    insights:                      # 论文全文分析：MinerU 解析 + 大模型抽取用途/评价
+      enabled: false
+      project_keyword: ""          # 在全文中搜索的项目名（启用时必填，如 MyProject）
+      mineru_token: ""             # 也叫 MINERU_TOKEN
+      llm_api_key: ""              # 也叫 DEEPSEEK_API_KEY
+      llm_base: "https://api.deepseek.com"
+      llm_model: "deepseek-v4-flash"
+      cache_dir: "data/mineru"     # markdown 缓存，避免重复调用 MinerU
+      max_papers_per_run: 5        # 每轮最多分析几篇新论文
   github:
     enabled: true
     repo: ""                       # owner/name
@@ -217,9 +228,32 @@ sources:
   - 单位去重：`LOWER+TRIM` 合并大小写差异
 - **下载量**（`download_metrics`）：每次采集每个仓库写一条快照；面板按"每源每日最后一条快照"聚合，同日多次采集不重复计数。整轮采集单事务写入，中途失败不会留下半份数据。
 - **论文引用**（`papers` / `paper_snapshots`）：Semantic Scholar 拉取引用种子 arXiv 论文的全部论文，记录引用论文数、种子论文被引数、引用论文的年份 / 期刊分布与每日快照。
+- **论文全文分析**（`paper_insights`，可选）：MinerU 把 arXiv PDF 解析为 markdown（缓存在 `data/mineru/`），再交给大模型抽取：
+  数据用途类别（训练集/基础数据/评测基准/相关工作…）、具体使用方式、论文对项目的评价原文与情感、技术关键词。
+  每日增量只分析新论文；已有分析默认跳过，可用脚本强制重跑。
 - **GitHub**（`github_repo` / `github_snapshots` / `github_issues`）：stars / forks / open issues 每日快照；issues 列表缓存 30 分钟。
 
 > 本服务**不记录访问 IP**：没有任何访问埋点、IP 归属地解析或访客统计。提交接口仅在内存中按连接 IP 做限频（不落库），可在 `TRUST_PROXY` 配置下从 `X-Forwarded-For` 取真实来源。
+
+### 论文全文分析（MinerU + 大模型，可选）
+
+`paper.insights` 开启且配置了 MinerU / 大模型令牌后，每日论文采集结束会自动增量分析新论文：
+
+1. 按 arXiv ID 下载 PDF，提交 MinerU（`model_version=vlm`）解析，轮询完成后保存 `full.md` 到 `data/mineru/`；
+2. 把标题 + 全文中项目名（`project_keyword`）前后上下文交给大模型（默认 DeepSeek，OpenAI 兼容接口）；
+3. 抽取 `role`（数据用途类别）、`usage`（具体使用方式）、`comments`（评价原文 + 情感）、`keywords`（技术关键词），写入 `paper_insights`；
+4. 面板「数据用途与评价」板块展示用途分布、使用方式、评价流与关键词，接口 `/api/v1/papers/insights`。
+
+手动补跑 / 单篇重跑：
+
+```bash
+.venv/bin/python scripts/analyze_papers.py                       # 增量（默认最多 5 篇）
+.venv/bin/python scripts/analyze_papers.py --all                 # 增量，不限数量
+.venv/bin/python scripts/analyze_papers.py --only VISTA --force  # 单篇强制重跑
+.venv/bin/python scripts/analyze_papers.py --only VISTA --parse-only  # 只让 MinerU 解析落盘
+```
+
+已有 markdown 缓存的论文不会重复调用 MinerU；`--refresh-md` 可强制重新解析。全文分析独立于 Semantic Scholar 引用采集，S2 限流时仍会执行。
 
 ## API
 
@@ -240,6 +274,7 @@ sources:
 | GET | `/api/v1/downloads/metrics` | 管理员 | 原始下载快照 |
 | GET | `/api/v1/papers` | 公开 | 引用论文列表（year/q 过滤） |
 | GET | `/api/v1/papers/stats` | 公开 | 引用统计（年份 / 期刊 / Top 被引 / 快照） |
+| GET | `/api/v1/papers/insights` | 公开 | 数据用途 / 他人评价 / 关键词（MinerU + 大模型） |
 | GET | `/api/v1/github` | 公开 | 仓库指标 + open issues |
 | GET | `/api/v1/dashboard` | 见配置 | 面板全量数据 |
 | POST | `/api/v1/admin/sync` | 管理员 | 后台触发一轮采集 |
@@ -278,6 +313,8 @@ crontab 示例（每天 03:00）：
 | `HF_TOKEN` / `HF_ENDPOINT` / `HF_USE_PROXY` | HuggingFace 令牌 / 端点 / 代理 |
 | `MODELSCOPE_API_TOKEN` | ModelScope 令牌 |
 | `S2_API_KEY` | Semantic Scholar 令牌（可选） |
+| `MINERU_TOKEN` | MinerU 令牌（论文全文解析，可选） |
+| `DEEPSEEK_API_KEY` / `DEEPSEEK_BASE` / `DEEPSEEK_MODEL` | 大模型抽取用途/评价/关键词（可选） |
 | `GITHUB_TOKEN` | GitHub 令牌（可选） |
 | `ANYSTATS_LOG_LEVEL` | 日志级别，默认 `INFO` |
 
@@ -307,6 +344,7 @@ AnyStats/
 ├── config.yaml            # 本地配置（gitignore，可写令牌）
 ├── start.sh / stop.sh     # 一键启动 / 停止
 ├── scripts/sync.py        # 手动采集（cron 备选）
+├── scripts/analyze_papers.py  # 手动补跑论文全文分析
 ├── app/
 │   ├── main.py            # FastAPI 入口（lifespan 内启动采集线程）
 │   ├── config.py          # 配置加载 + 环境变量覆盖
@@ -314,7 +352,7 @@ AnyStats/
 │   ├── scheduler.py       # 内置每日采集线程
 │   ├── pages.py           # 首页 / 登记表单
 │   ├── dashboard_page.py  # 统计面板（Plotly）
-│   ├── collectors/        # huggingface / modelscope / paper / github
+│   ├── collectors/        # huggingface / modelscope / paper / paper_insights / github
 │   ├── crud/              # 读写与聚合
 │   ├── routers/           # REST API
 │   └── static/            # plotly.min.js

@@ -2,7 +2,7 @@
 
 from ..config import settings
 from ..database import connect
-from . import github, huggingface, modelscope, papers
+from . import github, huggingface, modelscope, paper_insights, papers
 from .base import log
 
 COLLECTORS = {
@@ -32,6 +32,16 @@ def run_once(conn=None, only: list[str] | None = None) -> dict:
             except Exception as exc:
                 log.exception("%s 采集失败", name)
                 results[name] = {"ok": False, "error": str(exc)[:500]}
+
+        # 论文全文分析独立于 S2 引用采集：S2 限流时仍继续分析已有论文
+        if (not only or "paper" in only) and settings.insights_active():
+            try:
+                cfg = (settings.SOURCES.get("paper") or {}).get("insights") or {}
+                count = paper_insights.collect(conn, cfg)
+                results["paper_insights"] = {"ok": True, "count": count}
+            except Exception as exc:
+                log.exception("paper_insights 分析失败")
+                results["paper_insights"] = {"ok": False, "error": str(exc)[:500]}
     finally:
         if own_conn:
             conn.close()
