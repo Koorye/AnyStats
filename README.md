@@ -36,7 +36,7 @@ cp config.example.yaml config.yaml   # 首次创建本地配置（config.yaml �
 ./start.sh
 ```
 
-`start.sh` 发现缺少 `config.yaml` 时也会自动从模板复制一份。首次运行会创建 `.venv/` 并按 `requirements.txt` 安装依赖（约 1–3 分钟），随后后台启动 Web 与内置采集线程；看到 `✅ AnyStats 已启动` 即安装完成。不配数据源也能正常启动，只是面板没有对应数据。
+`start.sh` 发现缺少 `config.yaml` 时也会自动从模板复制一份。首次运行会创建 `.venv/` 并按 `requirements.txt` 安装依赖（约 1–3 分钟），随后在**前台**启动 Web 与内置采集线程（Ctrl-C 停止）。不配数据源也能正常启动，只是面板没有对应数据。
 
 国内网络下载依赖慢或超时，可指定 PyPI 镜像：
 
@@ -47,7 +47,7 @@ PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple ./start.sh
 其他系统差异：
 
 ```bash
-chmod +x start.sh stop.sh          # 从 zip 解压后丢失执行权限时
+chmod +x start.sh                  # 从 zip 解压后丢失执行权限时
 sudo apt install python3-venv      # Debian/Ubuntu 报 ensurepip is not available 时
 PYTHON=python3.12 ./start.sh       # 机器上有多个 Python，指定用哪个
 ```
@@ -96,12 +96,11 @@ docker compose up -d --build         # 端口 8100，挂载 ./config.yaml（只�
 常用命令：
 
 ```bash
-./start.sh --foreground      # 前台运行（Ctrl-C 退出，便于调试）
+./start.sh                   # 前台启动（Ctrl-C 退出）
 ./start.sh --port 9000       # 临时改端口（不改 config.yaml）
-./stop.sh                    # 停止后台进程
-./stop.sh && ./start.sh      # 修改 config.yaml 后重启生效
-tail -f .run/anystats.log    # 查看日志（仅后台模式）
 ```
+
+修改 `config.yaml` 后：Ctrl-C 停止，再重新运行 `./start.sh`。在 tmux / systemd 中运行时由对应的进程管理器负责后台与日志。
 
 服务默认监听 `0.0.0.0:8100`，同一局域网可直接访问；公网部署请先改掉 `admin_token` 并置于 HTTPS 反向代理之后（见「部署建议」）。
 
@@ -112,7 +111,7 @@ curl http://127.0.0.1:8100/healthz
 # {"status":"ok","app":"AnyStats","version":"1.0.0"}
 ```
 
-数据源采集失败（未配 token、镜像/网络不通、429 限流等）**不影响安装**：只在日志中报错，对应面板板块隐藏或留空。可访问 `/api/v1/meta` 查看各数据源是否生效（`sources.*.active`）。
+数据源采集失败（未配 token、镜像/网络不通、429 限流等）**不影响安装**：只在终端输出中报错，对应面板板块隐藏或留空。可访问 `/api/v1/meta` 查看各数据源是否生效（`sources.*.active`）。
 
 ### 安装常见问题
 
@@ -120,13 +119,13 @@ curl http://127.0.0.1:8100/healthz
 |---|---|---|
 | `python3: command not found` | 没装 Python 或不在 PATH | 安装 Python 3.10+；或 `PYTHON=/path/to/python3 ./start.sh` |
 | `ensurepip is not available` / `No module named venv` | 缺少 venv 组件 | Debian/Ubuntu：`sudo apt install python3-venv`；其他发行版安装对应的 python venv/pip 组件 |
-| `Permission denied: ./start.sh` | 解压后丢了执行位 | `chmod +x start.sh stop.sh`，或 `bash start.sh` |
+| `Permission denied: ./start.sh` | 解压后丢了执行位 | `chmod +x start.sh`，或 `bash start.sh` |
 | pip 下载超时 / SSL 错误 | PyPI 访问受限 | 设 `PIP_INDEX_URL=<镜像地址>/simple` 后重跑 |
-| `启动超时，请查看日志` | 端口被占、依赖缺失或导入失败 | `tail -n 80 .run/anystats.log`，常见 `Address already in use` / `ModuleNotFoundError` |
+| `启动失败 / Address already in use` | 端口被占、依赖缺失或导入失败 | 直接看终端报错；换端口 `./start.sh --port 9000`，或 `rm -rf .venv` 重装依赖 |
 | 启动即报 YAML / 配置错误 | `config.yaml` 缩进或取值不合法 | 按「配置说明」检查；`sync.daily_at` 需 `HH:MM` |
 | 依赖装坏、想重装 | 半途中断留下残缺 `.venv` | `rm -rf .venv && ./start.sh` |
 | 端口 8100 被占用 | 已有其他服务 | `./start.sh --port 9000`，或改 `server.port` |
-| 页面打不开、进程不在 | 后台进程被终端/系统回收 | 重新 `./start.sh`；长期运行用 systemd（见「部署建议」） |
+| 页面打不开、进程不在 | 前台进程已退出 | 重新 `./start.sh`；长期运行放 tmux 或 systemd（见「部署建议」） |
 | HuggingFace 采集报 `ConnectionError` / `SSLError` | 官方 API 不可达（镜像只代理文件下载） | 设 `use_proxy: true`，或换可访问的 `endpoint`；见「关于 HuggingFace 镜像」 |
 | 启动日志提示 `admin_token 仍为默认值` | 未改默认管理员令牌 | 改 `site.admin_token` 或设 `ANYSTATS_ADMIN_TOKEN` |
 | `Semantic Scholar 持续限流` / 429 | 共享 IP 池或 key 配额被限流 | 采集会自动重试 4 次（约 50 秒）；失败时保留上次数据，可稍后手动触发 `POST /api/v1/admin/sync` |
@@ -342,7 +341,7 @@ cp config.example.yaml config.yaml                # 从干净模板重建本地�
 AnyStats/
 ├── config.example.yaml    # 配置模板（入库）
 ├── config.yaml            # 本地配置（gitignore，可写令牌）
-├── start.sh / stop.sh     # 一键启动 / 停止
+├── start.sh               # 一键前台启动（Ctrl-C 停止）
 ├── scripts/sync.py        # 手动采集（cron 备选）
 ├── scripts/analyze_papers.py  # 手动补跑论文全文分析
 ├── app/
@@ -368,7 +367,16 @@ AnyStats/
 - 生产环境修改 `admin_token`，并收紧 `cors_origins`
 - 多 worker 部署时，内存限频按进程独立计数；如需严格限流请在网关层处理
 - 内置采集为进程内线程；多副本部署时请只让一个副本设置 `sync.enabled: true`
-- 日志默认写 `.run/anystats.log`（后台模式），长期运行建议配 logrotate 或改用 systemd/journald
+- 前台运行日志直接输出到终端；长期运行建议交给 tmux / systemd 收集与管理
+
+### 用 tmux 常驻
+
+```bash
+tmux new-session -d -s anystats -c /opt/AnyStats "./start.sh"
+tmux pipe-pane -t anystats -o "cat >> /opt/AnyStats/.run/anystats.log"
+tmux attach -t anystats        # 查看输出；Ctrl-C 停止后会话结束
+tmux kill-session -t anystats  # 直接停止
+```
 
 ### 用 systemd 托管
 
@@ -397,4 +405,4 @@ sudo systemctl enable --now anystats
 journalctl -u anystats -f
 ```
 
-把 `User` / `WorkingDirectory` 换成实际用户与仓库路径，并确保该用户对代码目录和 `data/` 有读写权限；启用 systemd 前先 `./stop.sh`，避免同一端口和数据库跑两份进程。
+把 `User` / `WorkingDirectory` 换成实际用户与仓库路径，并确保该用户对代码目录和 `data/` 有读写权限；启用 systemd 前先停止当前前台进程（Ctrl-C 或 `tmux kill-session`），避免同一端口和数据库跑两份进程。
