@@ -1,0 +1,23 @@
+site:
+  title: "AnyStats Test"
+  subtitle: "测试实例"
+  admin_token: "test-admin-token"
+  project_version: "0.0.1"
+  dashboard_auth: false
+server:
+  host: "127.0.0.1"
+  port: 8100
+database:
+  path: "data/test.db"
+sync:
+  enabled: false
+  run_on_start: false
+sources:
+  huggingface:
+    enabled: false
+  modelscope:
+    enabled: false
+  paper:
+    enabled: false
+  github:
+    enabled: false

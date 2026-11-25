@@ -1,0 +1,9 @@
+# 运行数据（含 SQLite 与日志）
+data/*
+!data/.gitkeep
+.run/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.env

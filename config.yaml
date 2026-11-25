@@ -1,0 +1,67 @@
+# ============================================================
+# AnyStats 配置（唯一必改文件）
+# 改完重启服务即可：./start.sh
+# 所有配置项都可用环境变量覆盖（见 README「环境变量」）
+# ============================================================
+
+site:
+  title: "AnyStats"
+  subtitle: "开源项目数据统计"
+  description: "登记使用情况，自动汇总 HuggingFace / ModelScope 下载量、论文引用与 GitHub 数据。"
+  project_version: "1.0.0"
+  # 管理员令牌：用于查看登记明细 / CSV 导出 / 原始快照；生产环境务必修改
+  admin_token: "change-me"
+  footer: "Powered by AnyStats"
+  # 面板是否公开。true=任何人可看汇总面板；false=需要管理员令牌
+  dashboard_auth: false
+
+server:
+  host: "0.0.0.0"
+  port: 8100
+  # 逗号分隔的允许来源；"*" 表示不限制
+  cors_origins: "*"
+  # 部署在 nginx 等反向代理后置 true，取 X-Forwarded-For 作客户端 IP（仅用于提交限频）
+  trust_proxy: false
+
+database:
+  # 相对路径基于项目根目录
+  path: "data/anystats.db"
+
+submit:
+  title: "使用登记"
+  description: "请在使用本项目前登记以下信息，带 * 为必填项。登记信息仅用于统计使用分布。"
+  license_text: "我已阅读并同意本项目使用条款"
+  org_example: "如：某某大学机器人实验室"
+
+sync:
+  # 内置每日采集线程（随 Web 服务一起启动，一键启动无需额外进程）
+  enabled: true
+  daily_at: "03:00"      # 服务器本地时区
+  run_on_start: true     # 启动时先立即采一轮
+
+# 按需启用数据源：留空或 enabled=false 的源会被跳过，面板对应板块自动隐藏
+sources:
+  huggingface:
+    enabled: true
+    org: ""              # 组织名；会自动枚举该组织下全部数据集
+    repos: []            # 额外仓库，如 ["org/dataset-name"]
+    # 国内服务器直连 huggingface.co 常被阻断，默认走镜像；可改 https://huggingface.co
+    endpoint: "https://hf-mirror.com"
+    use_proxy: false     # true=让 HF 请求走 HTTP(S)_PROXY（镜像一般必须直连）
+    token: ""            # 也可用环境变量 HF_TOKEN
+  modelscope:
+    enabled: true
+    org: ""              # 组织名；分页枚举该组织下全部数据集
+    repos: []
+    token: ""            # 也可用环境变量 MODELSCOPE_API_TOKEN
+  paper:
+    enabled: true
+    arxiv_id: ""         # 种子论文 arXiv ID（如 2511.17441），统计引用它的论文
+    # 匿名访问 Semantic Scholar 是共享 IP 池，容易 429；建议配置令牌（免费申请）
+    s2_api_key: ""       # 也可用环境变量 S2_API_KEY
+  github:
+    enabled: true
+    repo: ""             # owner/name，如 FlagOpen/RoboCOIN
+    token: ""            # GitHub 令牌（可选），也可用环境变量 GITHUB_TOKEN
+    include_prs: false   # issue 列表中是否包含 Pull Request
+    issue_limit: 50      # 最多展示多少个 open issues

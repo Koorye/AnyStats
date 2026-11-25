@@ -1,0 +1,146 @@
+"""下载量快照的写入与聚合（HuggingFace / ModelScope 通用）。"""
+
+import json
+from datetime import datetime, timedelta, timezone
+from sqlite3 import Connection
+from typing import Optional
+
+DEFAULT_URL_TEMPLATES = {
+    "huggingface": "https://huggingface.co/datasets/{repo_id}",
+    "modelscope": "https://modelscope.cn/datasets/{repo_id}",
+}
+
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def insert_metric(
+    conn: Connection,
+    *,
+    source: str,
+    repo_id: str,
+    downloads: int,
+    likes: Optional[int] = None,
+    extra_json: Optional[str] = None,
+    fetched_at: Optional[str] = None,
+) -> None:
+    conn.execute(
+        "INSERT INTO download_metrics (source, repo_id, downloads, likes, extra_json, fetched_at) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (source, repo_id, downloads, likes, extra_json, fetched_at or now_iso()),
+    )
+    conn.commit()
+
+
+def insert_snapshot(conn: Connection, source: str, rows: list[tuple]) -> int:
+    """整轮快照单事务落库，避免中途失败留下半份数据。
+
+    rows: [(repo_id, downloads, likes, extra_dict|None), ...]
+    """
+    fetched_at = now_iso()
+    conn.executemany(
+        "INSERT INTO download_metrics (source, repo_id, downloads, likes, extra_json, fetched_at) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        [
+            (source, repo_id, int(downloads), likes,
+             json.dumps(extra, ensure_ascii=False) if extra else None, fetched_at)
+            for repo_id, downloads, likes, extra in rows
+        ],
+    )
+    conn.commit()
+    return len(rows)
+
+
+def latest_per_repo(conn: Connection) -> dict[tuple[str, str], dict]:
+    """每个 (source, repo_id) 的最新一条快照。"""
+    rows = conn.execute(
+        "SELECT source, repo_id, downloads, likes, fetched_at "
+        "FROM download_metrics ORDER BY id"
+    ).fetchall()
+    latest: dict[tuple[str, str], dict] = {}
+    for row in rows:
+        latest[(row["source"], row["repo_id"])] = dict(row)
+    return latest
+
+
+def repo_url(source: str, repo_id: str, cfg: Optional[dict] = None) -> Optional[str]:
+    template = ((cfg or {}).get("url_template") or DEFAULT_URL_TEMPLATES.get(source))
+    return template.format(repo_id=repo_id) if template else None
+
+
+def list_sources(conn: Connection, sources: dict) -> list[dict]:
+    """渠道列表 = 配置的仓库 + 历史快照中出现过的仓库，附带最新下载量。"""
+    items: dict[tuple[str, str], dict] = {}
+
+    def _slot(source: str, repo_id: str) -> dict:
+        return items.setdefault(
+            (source, repo_id),
+            {
+                "source": source,
+                "repo_id": repo_id,
+                "url": repo_url(source, repo_id, sources.get(source)),
+                "latest_downloads": None,
+                "latest_fetched_at": None,
+            },
+        )
+
+    for source, cfg in sources.items():
+        for repo_id in cfg.get("repos") or []:
+            _slot(source, repo_id)
+    for (source, repo_id), snap in latest_per_repo(conn).items():
+        item = _slot(source, repo_id)
+        item["latest_downloads"] = snap["downloads"]
+        item["latest_fetched_at"] = snap["fetched_at"]
+    return sorted(items.values(), key=lambda x: (x["source"], x["repo_id"]))
+
+
+def latest_by_source(conn: Connection) -> list[dict]:
+    """各渠道最新累计下载量（同渠道多仓库求和）。"""
+    totals: dict[str, int] = {}
+    for (_source, _repo), snap in latest_per_repo(conn).items():
+        source = snap["source"]
+        totals[source] = totals.get(source, 0) + snap["downloads"]
+    return [{"source": source, "downloads": total} for source, total in sorted(totals.items())]
+
+
+def trend_series(conn: Connection, days: int = 30) -> dict[str, list[dict]]:
+    """每日每仓取最后一条快照（同日多次采集不重复计入），再按渠道逐日汇总。"""
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
+    rows = conn.execute(
+        "SELECT substr(fetched_at, 1, 10) AS day, source, repo_id, downloads "
+        "FROM download_metrics WHERE fetched_at >= ? ORDER BY id",
+        (since,),
+    ).fetchall()
+    last_of_day: dict[tuple[str, str, str], int] = {}
+    for row in rows:
+        last_of_day[(row["day"], row["source"], row["repo_id"])] = row["downloads"]
+
+    summed: dict[str, dict[str, int]] = {}
+    for (day, source, _repo), downloads in last_of_day.items():
+        summed.setdefault(source, {}).setdefault(day, 0)
+        summed[source][day] += downloads
+    return {
+        source: [{"date": day, "downloads": value} for day, value in sorted(by_day.items())]
+        for source, by_day in summed.items()
+    }
+
+
+def list_metrics(
+    conn: Connection,
+    *,
+    page: int,
+    page_size: int,
+    source: Optional[str] = None,
+):
+    where, params = [], []
+    if source:
+        where.append("source = ?")
+        params.append(source)
+    clause = (" WHERE " + " AND ".join(where)) if where else ""
+    total = conn.execute(f"SELECT COUNT(*) FROM download_metrics{clause}", params).fetchone()[0]
+    rows = conn.execute(
+        f"SELECT * FROM download_metrics{clause} ORDER BY id DESC LIMIT ? OFFSET ?",
+        [*params, page_size, (page - 1) * page_size],
+    ).fetchall()
+    return rows, total
