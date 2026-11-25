@@ -1,7 +1,8 @@
 """AnyStats 配置加载。
 
-唯一配置文件是项目根目录的 config.yaml；所有字段都能用环境变量覆盖，
-方便 Docker / 多实例部署。测试可通过 ANYSTATS_CONFIG 指向测试配置。
+唯一配置文件是项目根目录的 config.yaml（本地文件，已 gitignore；模板为
+config.example.yaml）；所有字段都能用环境变量覆盖，方便 Docker / 多实例部署。
+测试可通过 ANYSTATS_CONFIG 指向测试配置。
 """
 
 import copy

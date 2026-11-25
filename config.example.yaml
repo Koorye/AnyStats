@@ -1,7 +1,8 @@
 # ============================================================
-# AnyStats 配置（唯一必改文件）
-# 改完重启服务即可：./start.sh
-# 所有配置项都可用环境变量覆盖（见 README「环境变量」）
+# AnyStats 配置模板
+# 复制为 config.yaml 后修改：cp config.example.yaml config.yaml
+# config.yaml 已被 .gitignore 忽略，可以安全填写令牌，不会提交到仓库
+# 所有配置项也都可用环境变量覆盖（见 README「环境变量」）
 # ============================================================
 
 site:
@@ -12,7 +13,7 @@ site:
   # 管理员令牌：用于查看登记明细 / CSV 导出 / 原始快照；生产环境务必修改
   admin_token: "change-me"
   footer: "Powered by AnyStats"
-  # 面板是否公开。true=任何人可看汇总面板；false=需要管理员令牌
+  # 面板鉴权。true=查看汇总面板需要管理员令牌；false=公开
   dashboard_auth: false
 
 server:
@@ -45,7 +46,8 @@ sources:
     enabled: true
     org: ""              # 组织名；会自动枚举该组织下全部数据集
     repos: []            # 额外仓库，如 ["org/dataset-name"]
-    # 国内服务器直连 huggingface.co 常被阻断，默认走镜像；可改 https://huggingface.co
+    # hf-mirror 只加速文件下载；/api 元数据请求会 308 回源到 huggingface.co。
+    # 官方 API 不可达时，请改成可访问的端点，或把 use_proxy 设为 true
     endpoint: "https://hf-mirror.com"
     use_proxy: false     # true=让 HF 请求走 HTTP(S)_PROXY（镜像一般必须直连）
     token: ""            # 也可用环境变量 HF_TOKEN
@@ -58,7 +60,7 @@ sources:
     enabled: true
     arxiv_id: ""         # 种子论文 arXiv ID（如 2511.17441），统计引用它的论文
     # 匿名访问 Semantic Scholar 是共享 IP 池，容易 429；建议配置令牌（免费申请）
-    s2_api_key: ""       # 也可用环境变量 S2_API_KEY
+    s2_api_key: ""       # 也可用环境变量 S2_API_KEY；真实令牌请写在 config.yaml
   github:
     enabled: true
     repo: ""             # owner/name，如 FlagOpen/RoboCOIN

@@ -132,6 +132,15 @@ const COLORS = ['#2456e6', '#00a887', '#f2994a', '#9b51e0', '#eb5757', '#2d9cdb'
 
 function token() { return localStorage.getItem(TOKEN_KEY) || ''; }
 function fmt(n) { return (n === null || n === undefined) ? '—' : Number(n).toLocaleString('zh-CN'); }
+// 数据集名可能很长：保留前缀与后缀，避免 Y 轴刻度被图表边距裁掉
+function shortLabel(name) {
+  const s = String(name || '');
+  return s.length <= 34 ? s : s.slice(0, 22) + '…' + s.slice(-9);
+}
+function countAxis(values) {
+  const max = Math.max.apply(null, (values || []).concat([0]));
+  return max <= 10 ? {dtick: 1, tickformat: 'd'} : {tickformat: ',d'};
+}
 function esc(v) { return String(v === null || v === undefined ? '' : v)
   .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
   .replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
@@ -151,6 +160,17 @@ function plot(id, traces, layout) {
   };
   const merged = Object.assign({}, base, layout || {});
   Plotly.newPlot(id, traces, merged, {responsive: true, displayModeBar: false});
+}
+
+// 时间轴：只有一天快照时 Plotly 会把刻度渲染成 00:00、23:59 这类时间，这里显式只标日期
+function dateAxis(dates) {
+  const uniq = Array.from(new Set((dates || []).filter(Boolean))).sort();
+  if (!uniq.length) return {};
+  if (uniq.length === 1) {
+    return {type: 'date', tickmode: 'array', tickvals: uniq, ticktext: uniq};
+  }
+  const span = (new Date(uniq[uniq.length - 1]) - new Date(uniq[0])) / 86400000;
+  return {type: 'date', tickformat: span > 180 ? '%Y-%m' : '%m-%d'};
 }
 
 function setComputed(iso) {
@@ -208,7 +228,12 @@ function renderDownloads(data) {
     });
   });
   if (traces.length) {
-    plot('ch-trend', traces, {yaxis: {tickformat: ',', rangemode: 'tozero'}});
+    const trendDates = [];
+    traces.forEach(function (t) { trendDates.push.apply(trendDates, t.x); });
+    plot('ch-trend', traces, {
+      yaxis: {tickformat: ',', rangemode: 'tozero'},
+      xaxis: dateAxis(trendDates)
+    });
   } else {
     document.getElementById('ch-trend').innerHTML = '<div class="empty">暂无下载快照</div>';
   }
@@ -217,14 +242,14 @@ function renderDownloads(data) {
   if (ds.length) {
     plot('ch-topds', [{
       type: 'bar', orientation: 'h', marker: {color: '#4c79ff'},
-      y: ds.map(function (d) { return d.name; }),
+      y: ds.map(function (d) { return shortLabel(d.name); }),
       x: ds.map(function (d) { return d.total; }),
       customdata: ds.map(function (d) {
-        return Object.keys(d.platforms).map(function (k) {
+        return [d.name, Object.keys(d.platforms).map(function (k) {
           return labelOf(k) + ': ' + fmt(d.platforms[k]);
-        }).join(' | ');
+        }).join(' | ')];
       }),
-      hovertemplate: '%{y}<br>总下载 %{x:,}<br>%{customdata}<extra></extra>'
+      hovertemplate: '%{customdata[0]}<br>总下载 %{x:,}<br>%{customdata[1]}<extra></extra>'
     }], {margin: {l: 220, r: 24, t: 8, b: 42}, xaxis: {tickformat: ','}});
   } else {
     document.getElementById('ch-topds').innerHTML = '<div class="empty">暂无数据</div>';
@@ -234,7 +259,8 @@ function renderDownloads(data) {
 function renderPapers(data) {
   const p = data.papers;
   const sec = document.getElementById('sec-papers');
-  if (!p || !p.citing_papers) { sec.hidden = true; return; }
+  // 只要配置的种子论文已入库就展示板块；被引为 0 时展示空状态，而不是整块消失
+  if (!p || !p.seed) { sec.hidden = true; return; }
   sec.hidden = false;
 
   const seed = p.seed || {};
@@ -251,27 +277,30 @@ function renderPapers(data) {
       x: years.map(function (x) { return x.year; }),
       y: years.map(function (x) { return x.count; }),
       hovertemplate: '%{x} 年<br>引用论文 %{y} 篇<extra></extra>'
-    }], {yaxis: {title: '篇数'}});
+    }], {yaxis: Object.assign({title: '篇数'}, countAxis(years.map(function (x) { return x.count; })))});
   } else {
     document.getElementById('ch-pyear').innerHTML = '<div class="empty">暂无数据</div>';
   }
 
   const snaps = (p.snapshots || []).filter(function (s) { return s.date; });
-  if (snaps.length) {
+  const citeValues = snaps.map(function (s) { return Number(s.seed_citations) || 0; });
+  if (snaps.length && citeValues.some(function (v) { return v > 0; })) {
     plot('ch-pcite', [{
       type: 'scatter', mode: 'lines+markers', fill: 'tozeroy',
       line: {color: '#f2994a', width: 2.4}, marker: {size: 5},
       x: snaps.map(function (s) { return s.date; }),
-      y: snaps.map(function (s) { return s.seed_citations; }),
+      y: citeValues,
       hovertemplate: '%{x}<br>被引 %{y}<extra></extra>'
-    }], {yaxis: {rangemode: 'tozero'}});
+    }], {yaxis: Object.assign({rangemode: 'tozero'}, countAxis(citeValues)),
+      xaxis: dateAxis(snaps.map(function (s) { return s.date; }))});
   } else if (seed.citation_count) {
     plot('ch-pcite', [{
       type: 'bar', x: ['当前'], y: [seed.citation_count],
       marker: {color: '#f2994a'}
     }]);
   } else {
-    document.getElementById('ch-pcite').innerHTML = '<div class="empty">暂无快照</div>';
+    document.getElementById('ch-pcite').innerHTML =
+      '<div class="empty">种子论文暂无引用（被引 0）</div>';
   }
 
   const rows = (p.top_cited || []).map(function (paper) {
@@ -305,7 +334,9 @@ function renderGithub(data) {
       x: snaps.map(function (s) { return s.date; }),
       y: snaps.map(function (s) { return s.stars; }),
       hovertemplate: '%{x}<br>%{y} stars<extra></extra>'
-    }], {yaxis: {rangemode: 'tozero'}});
+    }], {yaxis: Object.assign({rangemode: 'tozero'},
+          countAxis(snaps.map(function (s) { return s.stars; }))),
+      xaxis: dateAxis(snaps.map(function (s) { return s.date; }))});
   }
 
   const rows = (gh.issues || []).map(function (issue) {
@@ -328,11 +359,14 @@ function renderCommunity(data) {
   const names = data.country_names || {};
   if (rows.length) {
     const mapped = rows.filter(function (r) { return r.iso3; });
+    const zValues = mapped.map(function (r) { return r.subjects; });
     plot('ch-map', [{
       type: 'choropleth', locations: mapped.map(function (r) { return r.iso3; }),
-      z: mapped.map(function (r) { return r.subjects; }),
+      z: zValues,
+      zmin: 0, zmax: Math.max.apply(null, zValues.concat([1])),
       text: mapped.map(function (r) { return names[r.country] || r.country; }),
-      colorscale: 'Blues', marker: {line: {color: '#fff', width: 0.6}},
+      colorscale: 'Blues', reversescale: true,
+      marker: {line: {color: '#fff', width: 0.6}},
       colorbar: {thickness: 10, outlinewidth: 0},
       hovertemplate: '%{text}<br>主体 %{z} 人<extra></extra>'
     }], {
@@ -348,7 +382,8 @@ function renderCommunity(data) {
       y: top.map(function (r) { return names[r.country] || r.country; }),
       x: top.map(function (r) { return r.subjects; }),
       hovertemplate: '%{y}<br>主体 %{x} 人<extra></extra>'
-    }], {margin: {l: 120, r: 16, t: 8, b: 42}});
+    }], {margin: {l: 120, r: 16, t: 8, b: 42},
+      xaxis: countAxis(top.map(function (r) { return r.subjects; }))});
   } else {
     document.getElementById('ch-map').innerHTML = '<div class="empty">暂无登记</div>';
     document.getElementById('ch-ctop').innerHTML = '<div class="empty">暂无登记</div>';
@@ -361,7 +396,9 @@ function renderCommunity(data) {
       x: monthly.map(function (m) { return m.month; }),
       y: monthly.map(function (m) { return m.count; }),
       hovertemplate: '%{x}<br>登记 %{y} 条<extra></extra>'
-    }], {yaxis: {title: '条数'}});
+    }], {yaxis: Object.assign({title: '条数'},
+          countAxis(monthly.map(function (m) { return m.count; }))),
+      xaxis: {type: 'category'}});
   } else {
     document.getElementById('ch-monthly').innerHTML = '<div class="empty">暂无登记</div>';
   }

@@ -16,9 +16,16 @@ def collect(conn, cfg: dict) -> int:
     datasets = []
     if org:
         # expand 必须显式请求 downloadsAllTime，否则只返回近 30 天 downloads
-        datasets.extend(
-            api.list_datasets(author=org, expand=["downloadsAllTime", "downloads"])
-        )
+        try:
+            datasets.extend(
+                api.list_datasets(author=org, expand=["downloadsAllTime", "downloads"])
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                f"HuggingFace 数据集列表获取失败（{endpoint or 'https://huggingface.co'}）：{exc}。"
+                "注意 hf-mirror.com 只代理文件下载，/api 元数据请求会 308 回源到 "
+                "huggingface.co；若官方 API 不可达，请配置可访问的端点或开启 use_proxy"
+            ) from exc
     for repo_id in extra:
         try:
             datasets.append(

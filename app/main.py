@@ -29,6 +29,11 @@ log = logging.getLogger("anystats")
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()
+    if settings.ADMIN_TOKEN == "change-me":
+        log.warning(
+            "site.admin_token 仍为默认值 change-me：管理员接口（登记明细 / CSV / 原始快照）"
+            "等同于公开，对外部署前请修改，或改用 ANYSTATS_ADMIN_TOKEN 环境变量"
+        )
     scheduler = None
     if settings.SYNC_ENABLED:
         scheduler = SyncScheduler()

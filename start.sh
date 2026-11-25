@@ -27,8 +27,13 @@ if ! command -v "$PYTHON" >/dev/null 2>&1; then
 fi
 
 if [[ ! -f "$ROOT/config.yaml" ]]; then
-  echo "缺少 config.yaml，请先复制并按需修改配置"
-  exit 1
+  if [[ -f "$ROOT/config.example.yaml" ]]; then
+    cp "$ROOT/config.example.yaml" "$ROOT/config.yaml"
+    echo "==> 未找到 config.yaml，已从 config.example.yaml 生成，请按需修改后重启"
+  else
+    echo "缺少 config.yaml 与 config.example.yaml，请从仓库重新获取配置模板"
+    exit 1
+  fi
 fi
 
 # 1) 虚拟环境 + 依赖（requirements 未变化时跳过安装）
