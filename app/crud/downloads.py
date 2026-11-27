@@ -104,6 +104,74 @@ def latest_by_source(conn: Connection) -> list[dict]:
     return [{"source": source, "downloads": total} for source, total in sorted(totals.items())]
 
 
+def download_info(
+    conn: Connection,
+    sources: dict,
+    *,
+    source: Optional[str] = None,
+    q: Optional[str] = None,
+    repo_id: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 50,
+) -> dict:
+    """按仓库查询最新下载量（公开接口）：过滤、分页、按下载量倒序。
+
+    - source：huggingface / modelscope 等渠道过滤
+    - q：repo_id 关键字（不区分大小写）
+    - repo_id：精确仓库 id
+    """
+    items: list[dict] = []
+    needle = q.strip().lower() if q else None
+    for (src, rid), snap in latest_per_repo(conn).items():
+        if source and src != source:
+            continue
+        if repo_id and rid != repo_id:
+            continue
+        if needle and needle not in rid.lower():
+            continue
+        items.append(
+            {
+                "source": src,
+                "repo_id": rid,
+                "downloads": int(snap["downloads"] or 0),
+                "likes": snap.get("likes"),
+                "url": repo_url(src, rid, sources.get(src)),
+                "fetched_at": snap.get("fetched_at"),
+            }
+        )
+    items.sort(key=lambda item: (-item["downloads"], item["repo_id"]))
+
+    total = len(items)
+    total_downloads = sum(item["downloads"] for item in items)
+    updated_at = max((item["fetched_at"] or "" for item in items), default="") or None
+    start = (page - 1) * page_size
+    paged = items[start:start + page_size]
+
+    grouped: dict[str, dict] = {}
+    for item in items:
+        entry = grouped.setdefault(
+            item["source"],
+            {"source": item["source"], "repos": 0, "downloads": 0, "latest_fetched_at": None},
+        )
+        entry["repos"] += 1
+        entry["downloads"] += item["downloads"]
+        if item["fetched_at"] and (
+            entry["latest_fetched_at"] is None
+            or item["fetched_at"] > entry["latest_fetched_at"]
+        ):
+            entry["latest_fetched_at"] = item["fetched_at"]
+
+    return {
+        "items": paged,
+        "total": total,
+        "total_downloads": total_downloads,
+        "page": page,
+        "page_size": page_size,
+        "source_totals": sorted(grouped.values(), key=lambda item: item["source"]),
+        "updated_at": updated_at,
+    }
+
+
 def trend_series(conn: Connection, days: int = 30) -> dict[str, list[dict]]:
     """每日每仓取最后一条快照（同日多次采集不重复计入），再按渠道逐日汇总。"""
     since = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")

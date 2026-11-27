@@ -268,6 +268,7 @@ sources:
 | GET | `/api/v1/submissions/{id}` | 管理员 | 登记详情 |
 | GET | `/api/v1/stats/summary` | 公开 | 聚合统计（主体 / 国家 / 下载 / 论文 / GitHub） |
 | GET | `/api/v1/stats/downloads` | 公开 | 各源最新下载量与趋势 |
+| GET | `/api/v1/downloads/info` | 公开 | 按仓库获取最新下载量（过滤 / 分页 / 倒序） |
 | GET | `/api/v1/stats/export` | 管理员 | CSV 导出（带 BOM） |
 | GET | `/api/v1/download-sources` | 公开 | 下载渠道列表与最新值 |
 | GET | `/api/v1/downloads/metrics` | 管理员 | 原始下载快照 |

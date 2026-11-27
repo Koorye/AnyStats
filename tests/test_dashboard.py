@@ -36,6 +36,41 @@ def test_downloads_api_and_dashboard(client):
     assert dash["features"]["huggingface"]["has_data"] is True
 
 
+def test_download_info_api(client):
+    _seed_downloads()
+    data = client.get("/api/v1/downloads/info?page_size=10").json()["data"]
+    assert data["total"] == 3
+    assert data["total_downloads"] == 180
+    assert [item["repo_id"] for item in data["items"]] == [
+        "org/pick_apple", "org/open_door", "org/pick_apple",
+    ]
+    assert data["items"][0]["source"] == "huggingface"
+    assert data["items"][0]["likes"] == 2
+    assert data["items"][0]["url"].startswith("https://huggingface.co/datasets/")
+    totals = {item["source"]: item for item in data["source_totals"]}
+    assert totals["huggingface"]["repos"] == 2
+    assert totals["huggingface"]["downloads"] == 150
+    assert totals["modelscope"]["downloads"] == 30
+
+    filtered = client.get("/api/v1/downloads/info?source=modelscope").json()["data"]
+    assert filtered["total"] == 1
+    assert filtered["total_downloads"] == 30
+    assert filtered["items"][0]["source"] == "modelscope"
+
+    exact = client.get(
+        "/api/v1/downloads/info?source=huggingface&repo_id=org/pick_apple"
+    ).json()["data"]
+    assert exact["total"] == 1 and exact["items"][0]["downloads"] == 100
+
+    keyword = client.get("/api/v1/downloads/info?q=OPEN").json()["data"]
+    assert keyword["total"] == 1
+    assert keyword["items"][0]["repo_id"] == "org/open_door"
+
+    page2 = client.get("/api/v1/downloads/info?page=2&page_size=1").json()["data"]
+    assert page2["total"] == 3
+    assert page2["items"][0]["repo_id"] == "org/open_door"
+
+
 def test_map_country_and_org_tree(client):
     post(client)
     post(client, name="Alice", email="alice@x.cn", country="US",

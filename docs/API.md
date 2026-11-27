@@ -97,6 +97,41 @@
 
 趋势口径：每源每日取最后一条快照，同仓库多平台分别汇总。
 
+### GET /api/v1/downloads/info
+
+公开接口，按仓库获取**最新下载量**，适合外部站点或脚本批量拉取。
+
+| 参数 | 默认 | 说明 |
+|---|---|---|
+| `source` | 空 | 渠道过滤，如 `huggingface` / `modelscope` |
+| `q` | 空 | repo_id 关键字（不区分大小写） |
+| `repo_id` | 空 | 精确仓库 id |
+| `page` / `page_size` | 1 / 50 | 分页，`page_size` 最大 200 |
+
+结果按下载量从高到低排序：
+
+```json
+{
+  "items": [
+    {"source": "huggingface", "repo_id": "org/demo", "downloads": 1234,
+     "likes": 12, "url": "https://huggingface.co/datasets/org/demo",
+     "fetched_at": "2026-01-01T03:00:00Z"}
+  ],
+  "total": 2,
+  "total_downloads": 1300,
+  "page": 1,
+  "page_size": 50,
+  "source_totals": [
+    {"source": "huggingface", "repos": 2, "downloads": 1300,
+     "latest_fetched_at": "2026-01-01T03:00:00Z"}
+  ],
+  "updated_at": "2026-01-01T03:00:00Z"
+}
+```
+
+示例：`GET /api/v1/downloads/info?source=huggingface&q=robot&page=1&page_size=50`
+或 `GET /api/v1/downloads/info?repo_id=org/demo`。
+
 ### GET /api/v1/download-sources
 
 渠道列表：配置中的 `repos` + 历史快照仓库，含 `url` / `latest_downloads` / `latest_fetched_at`。
