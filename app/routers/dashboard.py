@@ -34,7 +34,7 @@ def meta():
     return ok({**settings.public_info(), "sync": settings.sync_summary()})
 
 
-@router.post("/admin/sync")
+@router.post("/admin/sync", include_in_schema=False)
 def trigger_sync(_: None = Depends(require_admin)):
     """后台触发一轮采集（不阻塞请求）。"""
     return ok({"started": trigger_async()})

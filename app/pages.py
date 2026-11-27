@@ -134,7 +134,18 @@ function show(kind, text) {{
 }}
 
 function errMsg(j) {{
-  if (!j || !j.detail) return '提交失败，请检查填写内容';
+  if (!j) return '提交失败，请检查填写内容';
+  if (j.message) {{
+    var errors = (j.data && j.data.errors) || null;
+    if (errors && errors.length) {{
+      return errors.map(function (d) {{
+        var loc = (d.loc || []).filter(function (x) {{ return x !== 'body'; }}).join('.');
+        return loc ? loc + '：' + d.msg : d.msg;
+      }}).join('；');
+    }}
+    return j.message;
+  }}
+  if (!j.detail) return '提交失败，请检查填写内容';
   if (typeof j.detail === 'string') return j.detail;
   return j.detail.map(function (d) {{
     var loc = (d.loc || []).filter(function (x) {{ return x !== 'body'; }}).join('.');

@@ -172,6 +172,73 @@ def download_info(
     }
 
 
+def source_summary(conn: Connection) -> list[dict]:
+    """按渠道汇总最新快照：仓库数 / 累计下载 / 最近采集时间。"""
+    grouped: dict[str, dict] = {}
+    for (_source, _repo), snap in latest_per_repo(conn).items():
+        entry = grouped.setdefault(
+            snap["source"],
+            {"source": snap["source"], "repos": 0, "downloads": 0, "latest_fetched_at": None},
+        )
+        entry["repos"] += 1
+        entry["downloads"] += int(snap["downloads"] or 0)
+        if snap["fetched_at"] and (
+            entry["latest_fetched_at"] is None
+            or snap["fetched_at"] > entry["latest_fetched_at"]
+        ):
+            entry["latest_fetched_at"] = snap["fetched_at"]
+    return sorted(grouped.values(), key=lambda item: item["source"])
+
+
+def summary(conn: Connection) -> dict:
+    """下载量总览：渠道汇总 + 总仓库数 / 总下载量 / 最近更新时间。"""
+    sources = source_summary(conn)
+    return {
+        "sources": sources,
+        "repos": sum(item["repos"] for item in sources),
+        "downloads": sum(item["downloads"] for item in sources),
+        "updated_at": max((item["latest_fetched_at"] or "" for item in sources), default="") or None,
+    }
+
+
+def get_repo_metric(conn: Connection, source: str, repo_id: str) -> Optional[dict]:
+    """单个仓库的最新一条快照。"""
+    row = conn.execute(
+        "SELECT source, repo_id, downloads, likes, extra_json, fetched_at "
+        "FROM download_metrics WHERE source = ? AND repo_id = ? "
+        "ORDER BY id DESC LIMIT 1",
+        (source, repo_id),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def repo_history(conn: Connection, source: str, repo_id: str, days: int = 30) -> list[dict]:
+    """单个仓库按天去重后的历史快照（每日取最后一条）。"""
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
+    rows = conn.execute(
+        "SELECT substr(fetched_at, 1, 10) AS date, downloads, likes, fetched_at "
+        "FROM download_metrics WHERE source = ? AND repo_id = ? AND fetched_at >= ? "
+        "ORDER BY id",
+        (source, repo_id, since),
+    ).fetchall()
+    by_day: dict[str, dict] = {}
+    for row in rows:
+        by_day[row["date"]] = {
+            "date": row["date"],
+            "downloads": int(row["downloads"] or 0),
+            "likes": row["likes"],
+            "fetched_at": row["fetched_at"],
+        }
+    return [by_day[day] for day in sorted(by_day)]
+
+
+def get_metric(conn: Connection, metric_id: int) -> Optional[dict]:
+    row = conn.execute(
+        "SELECT * FROM download_metrics WHERE id = ?", (metric_id,)
+    ).fetchone()
+    return dict(row) if row else None
+
+
 def trend_series(conn: Connection, days: int = 30) -> dict[str, list[dict]]:
     """每日每仓取最后一条快照（同日多次采集不重复计入），再按渠道逐日汇总。"""
     since = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")

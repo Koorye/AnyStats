@@ -87,6 +87,43 @@ def test_dashboard_auth_switch(client, monkeypatch):
     assert resp.status_code == 200 and "overview" in resp.json()["data"]
 
 
+def test_unified_submission_and_system_endpoints(client):
+    post(client)
+    post(client, name="李四", email="lisi@x.cn", country="US",
+         organization="MIT", affiliation_type="university")
+
+    stats = client.get("/api/v1/submissions/stats").json()["data"]
+    assert stats["total"] == 2 and stats["subjects_unique"] == 2
+    countries = client.get("/api/v1/submissions/countries").json()["data"]
+    assert countries["total"] == 2
+    assert {item["iso3"] for item in countries["items"]} == {"CHN", "USA"}
+
+    orgs = client.get("/api/v1/submissions/organizations").json()["data"]
+    assert orgs["total"] == 2
+    export = client.get("/api/v1/submissions/export", headers=ADMIN)
+    assert export.status_code == 200 and export.content.startswith(b"\xef\xbb\xbf")
+
+    overview = client.get("/api/v1/stats").json()["data"]
+    assert overview["submissions"]["total"] == 2
+    assert "downloads" in overview and "papers" in overview
+    sync = client.get("/api/v1/sync/status").json()["data"]
+    assert "scheduler" in sync and "sources" in sync
+
+
+def test_unified_error_envelope(client):
+    missing = client.get("/api/v1/papers/999999")
+    assert missing.status_code == 404
+    body = missing.json()
+    assert body["code"] == 404 and body["message"] and body["data"] is None
+
+    invalid = client.post("/api/v1/submissions", json={"name": ""})
+    assert invalid.status_code == 422
+    body = invalid.json()
+    assert body["code"] == 422
+    assert body["message"] == "参数校验失败"
+    assert body["data"]["errors"]
+
+
 def test_ip_tracking_endpoints_removed(client):
     assert client.get("/api/v1/access-ips").status_code == 404
     assert client.post("/api/v1/track/visit", json={"path": "/"}).status_code == 404

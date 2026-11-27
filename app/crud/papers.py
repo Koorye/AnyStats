@@ -94,22 +94,32 @@ def list_papers(
     page_size: int,
     year: Optional[int] = None,
     q: Optional[str] = None,
+    role: Optional[str] = None,
+    min_citations: Optional[int] = None,
 ):
     where, params = [], []
     if year:
-        where.append("year = ?")
+        where.append("p.year = ?")
         params.append(year)
     if q:
-        where.append("(title LIKE ? OR authors_json LIKE ? OR venue LIKE ?)")
+        where.append("(p.title LIKE ? OR p.authors_json LIKE ? OR p.venue LIKE ?)")
         like = f"%{q}%"
         params.extend([like, like, like])
+    if role:
+        where.append("i.role = ?")
+        params.append(role)
+    if min_citations is not None:
+        where.append("p.citation_count >= ?")
+        params.append(min_citations)
     clause = (" WHERE " + " AND ".join(where)) if where else ""
-    total = conn.execute(f"SELECT COUNT(*) FROM papers{clause}", params).fetchone()[0]
+    base = " FROM papers p LEFT JOIN paper_insights i ON i.s2_id = p.s2_id"
+    total = conn.execute(f"SELECT COUNT(*) {base}{clause}", params).fetchone()[0]
     rows = conn.execute(
-        f"""SELECT id, s2_id, arxiv_id, doi, title, authors_json, year,
-                   publication_date, venue, citation_count
-            FROM papers{clause}
-            ORDER BY COALESCE(year, 0) DESC, citation_count DESC, id DESC
+        f"""SELECT p.id, p.s2_id, p.arxiv_id, p.doi, p.title, p.authors_json, p.year,
+                   p.publication_date, p.venue, p.citation_count,
+                   i.role, i.usage, i.keywords_json, i.comments_json
+            {base}{clause}
+            ORDER BY COALESCE(p.year, 0) DESC, p.citation_count DESC, p.id DESC
             LIMIT ? OFFSET ?""",
         [*params, page_size, (page - 1) * page_size],
     ).fetchall()
@@ -117,14 +127,54 @@ def list_papers(
     for row in rows:
         item = dict(row)
         item["authors"] = json.loads(item.pop("authors_json") or "[]")
-        item["url"] = (
-            f"https://arxiv.org/abs/{item['arxiv_id']}" if item.get("arxiv_id")
-            else (f"https://doi.org/{item['doi']}" if item.get("doi")
-                  else (f"https://api.semanticscholar.org/paper/{item['s2_id']}"
-                        if item.get("s2_id") else None))
-        )
+        item["keywords"] = json.loads(item.pop("keywords_json") or "[]")
+        comments = json.loads(item.pop("comments_json") or "[]")
+        item["comments"] = comments
+        item["comments_count"] = len(comments)
+        item["url"] = _paper_url(item)
         items.append(item)
     return items, total
+
+
+def _paper_url(item: dict) -> Optional[str]:
+    if item.get("arxiv_id"):
+        return f"https://arxiv.org/abs/{item['arxiv_id']}"
+    if item.get("doi"):
+        return f"https://doi.org/{item['doi']}"
+    if item.get("s2_id"):
+        return f"https://api.semanticscholar.org/paper/{item['s2_id']}"
+    return None
+
+
+def get_paper(conn: Connection, paper_id: int) -> Optional[dict]:
+    """单篇论文详情：元数据 + 全文分析（role/usage/keywords/comments）。"""
+    row = conn.execute(
+        """SELECT p.*, i.role, i.usage, i.keywords_json, i.comments_json,
+                  i.md_path, i.analyzed_at, i.model
+           FROM papers p LEFT JOIN paper_insights i ON i.s2_id = p.s2_id
+           WHERE p.id = ?""",
+        (paper_id,),
+    ).fetchone()
+    if not row:
+        return None
+    item = dict(row)
+    item["authors"] = json.loads(item.pop("authors_json") or "[]")
+    item["keywords"] = json.loads(item.pop("keywords_json") or "[]")
+    item["comments"] = json.loads(item.pop("comments_json") or "[]")
+    item["fields"] = json.loads(item.pop("fields_json") or "{}")
+    item["url"] = _paper_url(item)
+    return item
+
+
+def list_snapshots(conn: Connection) -> dict:
+    snapshots = [
+        dict(row)
+        for row in conn.execute(
+            "SELECT date, seed_citations, citing_papers, citing_citations "
+            "FROM paper_snapshots ORDER BY date"
+        )
+    ]
+    return {"items": snapshots, "seed": get_meta(conn, "seed_paper", {})}
 
 
 def insights_summary(conn: Connection, *, limit: int = 300) -> dict:

@@ -4,6 +4,7 @@ from sqlite3 import Connection
 from typing import Optional
 
 from ..config import settings
+from ..countries import ISO2_TO_ISO3
 from ..schemas import SubmissionCreate
 
 # 去重"主体"：优先邮箱；无邮箱则 姓名|国家|规范化单位。
@@ -119,3 +120,50 @@ def stats_summary(conn: Connection) -> dict:
         "top_organizations": _group_counts(conn, "organization"),
         "monthly_trend": [dict(row) for row in monthly],
     }
+
+
+def country_breakdown(conn: Connection) -> list[dict]:
+    """按国家/地区统计去重主体与单位。"""
+    rows = conn.execute(
+        f"""SELECT country,
+                   COUNT(DISTINCT subject_key) AS subjects,
+                   COUNT(DISTINCT org_key) AS organizations
+            FROM ({SUBJECT_VIEW})
+            GROUP BY country ORDER BY subjects DESC, country"""
+    ).fetchall()
+    return [
+        {
+            "country": row["country"],
+            "iso3": ISO2_TO_ISO3.get(row["country"]),
+            "subjects": row["subjects"],
+            "organizations": row["organizations"],
+        }
+        for row in rows
+    ]
+
+
+def org_tree(conn: Connection) -> list[dict]:
+    """两级单位树：机构类型 -> 具体单位（按去重主体数排序）。"""
+    rows = conn.execute(
+        f"""SELECT affiliation_type, org_key, MAX(organization) AS organization,
+                   COUNT(DISTINCT subject_key) AS subjects
+            FROM ({SUBJECT_VIEW})
+            GROUP BY affiliation_type, org_key"""
+    ).fetchall()
+    grouped: dict[str, list[dict]] = {}
+    for row in rows:
+        grouped.setdefault(row["affiliation_type"], []).append(
+            {"organization": row["organization"], "subjects": row["subjects"]}
+        )
+    tree = []
+    for affiliation, orgs in grouped.items():
+        orgs.sort(key=lambda item: -item["subjects"])
+        tree.append(
+            {
+                "affiliation_type": affiliation,
+                "total_subjects": sum(item["subjects"] for item in orgs),
+                "organizations": orgs,
+            }
+        )
+    tree.sort(key=lambda group: -group["total_subjects"])
+    return tree

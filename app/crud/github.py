@@ -132,6 +132,13 @@ def list_issues(conn: Connection, repo: str, *, limit: int = 50, include_prs: bo
     return items
 
 
+def issue_count(conn: Connection, repo: str, *, include_prs: bool = False) -> int:
+    clause = "" if include_prs else " AND is_pr = 0"
+    return conn.execute(
+        f"SELECT COUNT(*) FROM github_issues WHERE repo = ?{clause}", (repo,)
+    ).fetchone()[0]
+
+
 def snapshots(conn: Connection, repo: Optional[str] = None) -> list[dict]:
     if repo:
         rows = conn.execute(

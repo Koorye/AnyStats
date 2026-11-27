@@ -259,25 +259,78 @@ sources:
 完整说明见 [docs/API.md](docs/API.md)，交互式文档 `/docs`。成功响应统一为
 `{"code": 0, "message": "ok", "data": ...}`；管理员接口使用请求头 `X-Admin-Token`。
 
+统一响应格式：
+
+- 成功：`{"code": 0, "message": "ok", "data": ...}`
+- 失败：`{"code": <HTTP 状态码>, "message": "...", "data": ...}`
+- 分页：`data = {items, total, page, page_size}`
+
+所有资源使用 `/api/v1/<resource>` 复数形式；旧路径保留为兼容别名（隐藏于 Swagger）。
+
+**系统 / 总览**
+
 | 方法 | 路径 | 鉴权 | 说明 |
 |---|---|---|---|
 | GET | `/healthz` | 公开 | 健康检查 |
-| GET | `/api/v1/meta` | 公开 | 站点信息与数据源状态（不含令牌） |
+| GET | `/api/v1/meta` | 公开 | 站点信息、数据源状态与采集计划 |
+| GET | `/api/v1/sync/status` | 公开 | 各源配置、最近采集时间与进度 |
+| POST | `/api/v1/sync` | 管理员 | 后台触发一轮采集 |
+| GET | `/api/v1/dashboard` | 见配置 | 面板全量数据 |
+| GET | `/api/v1/stats` | 公开 | 全站总览（登记/下载/论文/洞察/GitHub） |
+
+**分项统计**
+
+| 方法 | 路径 | 鉴权 | 说明 |
+|---|---|---|---|
+| GET | `/api/v1/stats/submissions` | 公开 | 登记聚合统计 |
+| GET | `/api/v1/stats/downloads` | 公开 | 下载总览 + 渠道最新值 + 趋势 |
+| GET | `/api/v1/stats/papers` | 公开 | 论文引用统计 + 全文洞察汇总 |
+| GET | `/api/v1/stats/github` | 公开 | GitHub 仓库指标 + issues + 快照 |
+
+**登记**
+
+| 方法 | 路径 | 鉴权 | 说明 |
+|---|---|---|---|
 | POST | `/api/v1/submissions` | 公开（限频） | 提交使用登记（`website` 为蜜罐字段） |
 | GET | `/api/v1/submissions` | 管理员 | 登记明细（分页 + 过滤） |
+| GET | `/api/v1/submissions/stats` | 公开 | 登记聚合统计 |
+| GET | `/api/v1/submissions/countries` | 公开 | 按国家/地区的主体与单位数 |
+| GET | `/api/v1/submissions/organizations` | 公开 | 机构类型 → 单位两级分布 |
+| GET | `/api/v1/submissions/export` | 管理员 | CSV 导出（带 BOM） |
 | GET | `/api/v1/submissions/{id}` | 管理员 | 登记详情 |
-| GET | `/api/v1/stats/summary` | 公开 | 聚合统计（主体 / 国家 / 下载 / 论文 / GitHub） |
-| GET | `/api/v1/stats/downloads` | 公开 | 各源最新下载量与趋势 |
-| GET | `/api/v1/downloads/info` | 公开 | 按仓库获取最新下载量（过滤 / 分页 / 倒序） |
-| GET | `/api/v1/stats/export` | 管理员 | CSV 导出（带 BOM） |
-| GET | `/api/v1/download-sources` | 公开 | 下载渠道列表与最新值 |
+
+**下载量**
+
+| 方法 | 路径 | 鉴权 | 说明 |
+|---|---|---|---|
+| GET | `/api/v1/downloads` | 公开 | 按仓库最新下载量（过滤/分页/倒序） |
+| GET | `/api/v1/downloads/sources` | 公开 | 各渠道仓库数、累计下载与更新时间 |
+| GET | `/api/v1/downloads/summary` | 公开 | 全站下载总览 |
+| GET | `/api/v1/downloads/trend` | 公开 | 各渠道每日累计下载趋势 |
+| GET | `/api/v1/downloads/{source}/{repo_id}` | 公开 | 单仓库最新值 + 每日历史 |
 | GET | `/api/v1/downloads/metrics` | 管理员 | 原始下载快照 |
-| GET | `/api/v1/papers` | 公开 | 引用论文列表（year/q 过滤） |
-| GET | `/api/v1/papers/stats` | 公开 | 引用统计（年份 / 期刊 / Top 被引 / 快照） |
-| GET | `/api/v1/papers/insights` | 公开 | 数据用途 / 他人评价 / 关键词（MinerU + 大模型） |
-| GET | `/api/v1/github` | 公开 | 仓库指标 + open issues |
-| GET | `/api/v1/dashboard` | 见配置 | 面板全量数据 |
-| POST | `/api/v1/admin/sync` | 管理员 | 后台触发一轮采集 |
+| GET | `/api/v1/downloads/metrics/{id}` | 管理员 | 单条原始快照 |
+
+**论文**
+
+| 方法 | 路径 | 鉴权 | 说明 |
+|---|---|---|---|
+| GET | `/api/v1/papers` | 公开 | 引用论文列表（year/q/role/min_citations） |
+| GET | `/api/v1/papers/{id}` | 公开 | 论文详情 + 全文分析 |
+| GET | `/api/v1/papers/stats` | 公开 | 引用统计（年份/期刊/Top 被引/快照） |
+| GET | `/api/v1/papers/insights` | 公开 | 数据用途 / 他人评价 / 关键词 |
+| GET | `/api/v1/papers/snapshots` | 公开 | 种子论文每日引用快照 |
+
+**GitHub**
+
+| 方法 | 路径 | 鉴权 | 说明 |
+|---|---|---|---|
+| GET | `/api/v1/github` | 公开 | 仓库指标 + issues + 快照 |
+| GET | `/api/v1/github/repo` | 公开 | 仓库最新指标 |
+| GET | `/api/v1/github/issues` | 公开 | open issues 列表 |
+| GET | `/api/v1/github/snapshots` | 公开 | stars/forks/issues 每日快照 |
+
+> 兼容别名（仍然可用，但保留旧的响应结构；新代码请使用上表的规范 URL）：`/api/v1/stats/summary`、`/api/v1/stats/downloads`、`/api/v1/stats/export`、`/api/v1/download-sources`、`/api/v1/downloads/info`、`/api/v1/admin/sync`。
 
 ## 手动采集 / 定时任务
 

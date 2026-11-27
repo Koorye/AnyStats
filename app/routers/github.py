@@ -11,7 +11,7 @@ from ..response import ok
 router = APIRouter(prefix="/api/v1/github", tags=["github"])
 
 
-@router.get("")
+@router.get("", include_in_schema=False)
 def github_overview(conn: Connection = Depends(get_db)):
     """仓库指标 + open issues（issues 30 分钟缓存，失败时沿用旧缓存）。"""
     cfg = settings.SOURCES.get("github") or {}
@@ -27,7 +27,7 @@ def github_overview(conn: Connection = Depends(get_db)):
     return ok({"enabled": True, **(data or {"repo": cfg.get("repo"), "issues": []})})
 
 
-@router.get("/issues")
+@router.get("/issues", include_in_schema=False)
 def github_issues(conn: Connection = Depends(get_db)):
     cfg = settings.SOURCES.get("github") or {}
     ensure_issues_cached(conn, cfg)

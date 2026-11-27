@@ -11,13 +11,13 @@ from ..security import require_admin
 router = APIRouter(prefix="/api/v1", tags=["downloads"])
 
 
-@router.get("/download-sources")
+@router.get("/download-sources", include_in_schema=False)
 def list_sources(conn: Connection = Depends(get_db)):
     """下载渠道列表：配置的仓库 + 历史快照，附带最新下载量。"""
     return ok({"items": crud.downloads.list_sources(conn, settings.SOURCES)})
 
 
-@router.get("/downloads/info")
+@router.get("/downloads/info", include_in_schema=False)
 def download_info(
     source: str | None = Query(
         default=None,
@@ -47,7 +47,7 @@ def download_info(
     )
 
 
-@router.get("/downloads/metrics")
+@router.get("/downloads/metrics", include_in_schema=False)
 def list_metrics(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),

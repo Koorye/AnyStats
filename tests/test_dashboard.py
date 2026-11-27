@@ -2,7 +2,7 @@ from app import config
 from app.crud import downloads, github, papers
 from app.database import connect
 
-from .test_api import post
+from .test_api import ADMIN, post
 
 
 def _seed_downloads():
@@ -69,6 +69,118 @@ def test_download_info_api(client):
     page2 = client.get("/api/v1/downloads/info?page=2&page_size=1").json()["data"]
     assert page2["total"] == 3
     assert page2["items"][0]["repo_id"] == "org/open_door"
+
+
+def test_unified_downloads_endpoints(client):
+    _seed_downloads()
+
+    stats = client.get("/api/v1/stats/downloads").json()["data"]
+    assert stats["summary"]["downloads"] == 180
+    assert stats["summary"]["repos"] == 3
+    assert {item["source"]: item["downloads"] for item in stats["latest"]} == {
+        "huggingface": 150, "modelscope": 30,
+    }
+
+    summary = client.get("/api/v1/downloads/summary").json()["data"]
+    assert summary["downloads"] == 180
+    assert summary["repos"] == 3
+
+    sources = client.get("/api/v1/downloads/sources").json()["data"]["items"]
+    by_source = {item["source"]: item for item in sources}
+    assert by_source["huggingface"]["repos"] == 2
+    assert by_source["huggingface"]["downloads"] == 150
+    assert by_source["modelscope"]["downloads"] == 30
+
+    listing = client.get("/api/v1/downloads?page_size=10").json()["data"]
+    assert listing["total"] == 3
+    assert listing["total_downloads"] == 180
+    assert [item["repo_id"] for item in listing["items"]] == [
+        "org/pick_apple", "org/open_door", "org/pick_apple",
+    ]
+
+    detail = client.get("/api/v1/downloads/huggingface/org/pick_apple").json()["data"]
+    assert detail["latest"]["downloads"] == 100
+    assert detail["latest"]["url"].startswith("https://huggingface.co/datasets/")
+    assert detail["history"]
+
+    conn = connect()
+    metric_id = conn.execute(
+        "SELECT id FROM download_metrics WHERE source = 'huggingface' "
+        "AND repo_id = 'org/pick_apple' ORDER BY id DESC LIMIT 1"
+    ).fetchone()[0]
+    assert client.get(f"/api/v1/downloads/metrics/{metric_id}").status_code == 401
+    metric = client.get(
+        f"/api/v1/downloads/metrics/{metric_id}", headers=ADMIN
+    ).json()["data"]
+    assert metric["downloads"] == 100
+
+    missing = client.get("/api/v1/downloads/huggingface/org/not-found")
+    assert missing.status_code == 404
+    body = missing.json()
+    assert body["code"] == 404 and body["message"] and body["data"] is None
+
+
+def test_unified_papers_endpoints(client, monkeypatch):
+    monkeypatch.setitem(config.settings.SOURCES["paper"], "enabled", True)
+    monkeypatch.setitem(config.settings.SOURCES["paper"], "arxiv_id", "2511.17441")
+    conn = connect()
+    papers.upsert_paper(conn, {
+        "s2_id": "p-unified", "title": "Unified Paper", "authors": ["A"],
+        "year": 2026, "venue": "CoRL", "citation_count": 9, "arxiv_id": "2601.99999",
+    })
+    conn.execute(
+        """INSERT INTO paper_insights
+               (s2_id, arxiv_id, role, usage, keywords_json, comments_json,
+                analyzed_at, model)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        ("p-unified", "2601.99999", "training_data", "直接用于训练",
+         '["vla"]', '[{"text": "good data", "sentiment": "positive"}]',
+         "2026-01-01T00:00:00Z", "test"),
+    )
+    conn.commit()
+    papers.save_snapshot(conn, "2026-01-01", seed_citations=5,
+                         citing_papers=1, citing_citations=9)
+
+    listing = client.get("/api/v1/papers?role=training_data&min_citations=5").json()["data"]
+    assert listing["total"] == 1
+    assert listing["items"][0]["role"] == "training_data"
+    assert listing["items"][0]["usage"] == "直接用于训练"
+    paper_id = listing["items"][0]["id"]
+
+    detail = client.get(f"/api/v1/papers/{paper_id}").json()["data"]
+    assert detail["title"] == "Unified Paper"
+    assert detail["comments"][0]["sentiment"] == "positive"
+    assert detail["keywords"] == ["vla"]
+
+    snapshots = client.get("/api/v1/papers/snapshots").json()["data"]
+    assert snapshots["items"][-1]["seed_citations"] == 5
+    assert client.get("/api/v1/papers/stats").json()["data"]["insights"]["analyzed"] == 1
+
+    missing = client.get("/api/v1/papers/999999")
+    assert missing.status_code == 404
+    assert missing.json()["code"] == 404
+
+
+def test_unified_github_endpoints(client, monkeypatch):
+    monkeypatch.setitem(config.settings.SOURCES["github"], "enabled", True)
+    monkeypatch.setitem(config.settings.SOURCES["github"], "repo", "o/r")
+    conn = connect()
+    github.upsert_repo(conn, "o/r", {
+        "stars": 12, "forks": 3, "watchers": 2, "open_issues": 1,
+        "description": "demo", "topics": ["robotics"], "html_url": "https://github.com/o/r",
+    })
+    github.save_snapshot(conn, "o/r", "2026-01-01")
+    github.replace_issues(conn, "o/r", [{
+        "number": 7, "title": "Bug", "state": "open", "user": {"login": "dev"},
+        "labels": [{"name": "bug"}], "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-01T00:00:00Z", "html_url": "https://github.com/o/r/issues/7",
+        "comments": 0,
+    }])
+
+    repo = client.get("/api/v1/github/repo").json()["data"]
+    assert repo["stars"] == 12 and repo["issue_count"] == 1
+    snapshots = client.get("/api/v1/github/snapshots").json()["data"]
+    assert snapshots["items"][0]["stars"] == 12
 
 
 def test_map_country_and_org_tree(client):

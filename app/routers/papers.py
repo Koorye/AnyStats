@@ -9,7 +9,7 @@ from ..response import ok
 router = APIRouter(prefix="/api/v1/papers", tags=["papers"])
 
 
-@router.get("")
+@router.get("", include_in_schema=False)
 def list_papers(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
@@ -24,13 +24,13 @@ def list_papers(
     return ok({"items": items, "total": total, "page": page, "page_size": page_size})
 
 
-@router.get("/insights")
+@router.get("/insights", include_in_schema=False)
 def papers_insights(conn: Connection = Depends(get_db)):
     """数据用途 / 他人评价 / 关键词（MinerU + 大模型分析结果）。"""
     return ok(crud.papers.insights_summary(conn))
 
 
-@router.get("/stats")
+@router.get("/stats", include_in_schema=False)
 def papers_stats(conn: Connection = Depends(get_db)):
     """学术影响统计：引用数、按年份、期刊、Top 被引。"""
     return ok(crud.papers.stats_summary(conn))

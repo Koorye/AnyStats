@@ -40,7 +40,7 @@ def _github_brief(conn: Connection) -> dict | None:
     }
 
 
-@router.get("/summary")
+@router.get("/summary", include_in_schema=False)
 def summary(conn: Connection = Depends(get_db)):
     """公开聚合统计：只含数字，不含个人信息。"""
     data = crud.submissions.stats_summary(conn)
@@ -50,7 +50,7 @@ def summary(conn: Connection = Depends(get_db)):
     return ok(data)
 
 
-@router.get("/downloads")
+@router.get("/downloads", include_in_schema=False)
 def downloads_stats(days: int = Query(default=30, ge=1, le=365),
                     conn: Connection = Depends(get_db)):
     """下载量趋势：每源每日取最后一条快照，避免同日多次采集重复计数。"""
@@ -62,7 +62,7 @@ def downloads_stats(days: int = Query(default=30, ge=1, le=365),
     )
 
 
-@router.get("/export")
+@router.get("/export", include_in_schema=False)
 def export(
     format: str = "csv",
     country: str | None = None,

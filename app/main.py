@@ -5,16 +5,19 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .config import settings
 from .dashboard_page import dashboard_html
 from .database import init_db
 from .pages import index_html, submit_html
-from .routers import dashboard, downloads, github, papers, stats, submissions
+from .routers import api_v1, dashboard, downloads, github, papers, stats, submissions
 from .scheduler import SyncScheduler
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -60,10 +63,39 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# 统一风格的资源接口放最前，优先匹配新的规范 URL；旧路由保留作兼容别名。
+app.include_router(api_v1.router)
+
 for module in (submissions, stats, downloads, dashboard, papers, github):
     app.include_router(module.router)
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(_: Request, exc: StarletteHTTPException):
+    detail = exc.detail
+    message = detail if isinstance(detail, str) else "请求失败"
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "code": exc.status_code,
+            "message": message,
+            "data": None if isinstance(detail, str) else detail,
+        },
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(_: Request, exc: RequestValidationError):
+    return JSONResponse(
+        status_code=422,
+        content={
+            "code": 422,
+            "message": "参数校验失败",
+            "data": {"errors": jsonable_encoder(exc.errors())},
+        },
+    )
 
 
 @app.get("/healthz", tags=["meta"])
