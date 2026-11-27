@@ -31,6 +31,8 @@ Base URL：`/api/v1`（页面为 `/`、`/submit`、`/dashboard`、`/docs`）。
 {"items": [...], "total": 100, "page": 1, "page_size": 20}
 ```
 
+**缓存**：下载列表/总览/趋势、全站统计和面板聚合默认 30 秒进程内缓存；数据每天更新一次，前端轮询建议 30–60 秒。
+
 **鉴权**
 
 管理员接口使用请求头 `X-Admin-Token: <site.admin_token>`；未配置令牌的公开接口不需要。

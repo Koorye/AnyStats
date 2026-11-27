@@ -36,6 +36,10 @@ CREATE TABLE IF NOT EXISTS download_metrics (
 );
 CREATE INDEX IF NOT EXISTS idx_download_metrics_lookup
     ON download_metrics(source, repo_id, fetched_at);
+CREATE INDEX IF NOT EXISTS idx_download_metrics_fetched
+    ON download_metrics(fetched_at);
+CREATE INDEX IF NOT EXISTS idx_download_metrics_latest
+    ON download_metrics(source, repo_id, id);
 
 -- 引用种子论文的论文（Semantic Scholar）
 CREATE TABLE IF NOT EXISTS papers (
@@ -130,9 +134,10 @@ CREATE INDEX IF NOT EXISTS idx_github_issues_repo ON github_issues(repo);
 
 
 def connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(settings.DB_PATH, timeout=30)
+    # FastAPI 的同步依赖与 sync 端点可能在不同线程执行；
+    # 每个请求独立连接，允许跨线程顺序使用（不共享连接）。
+    conn = sqlite3.connect(settings.DB_PATH, timeout=30, check_same_thread=False)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=10000")
     return conn
 
@@ -143,6 +148,9 @@ def init_db() -> None:
         os.makedirs(parent, exist_ok=True)
     conn = connect()
     try:
+        # WAL 是数据库级持久设置，初始化时设置一次即可；
+        # 每个连接都执行 journal_mode 写 PRAGMA 会在并发下争锁。
+        conn.execute("PRAGMA journal_mode=WAL")
         conn.executescript(SCHEMA)
         conn.commit()
     finally:

@@ -3,6 +3,7 @@ from sqlite3 import Connection
 from fastapi import APIRouter, Depends, Header, Query
 
 from .. import crud
+from ..cache import cached
 from ..config import settings
 from ..database import get_db
 from ..response import ok
@@ -24,8 +25,13 @@ def dashboard(
     _: None = Depends(dashboard_guard),
     conn: Connection = Depends(get_db),
 ):
-    """面板数据（实时读库聚合）。"""
-    return ok(crud.dashboard.compute_dashboard(conn, trend_days=days))
+    """面板数据（实时读库聚合，30 秒进程内缓存）。"""
+    data = cached(
+        ("dashboard", settings.DB_PATH, days),
+        30.0,
+        lambda: crud.dashboard.compute_dashboard(conn, trend_days=days),
+    )
+    return ok(data)
 
 
 @router.get("/meta")

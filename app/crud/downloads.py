@@ -53,15 +53,24 @@ def insert_snapshot(conn: Connection, source: str, rows: list[tuple]) -> int:
 
 
 def latest_per_repo(conn: Connection) -> dict[tuple[str, str], dict]:
-    """每个 (source, repo_id) 的最新一条快照。"""
+    """每个 (source, repo_id) 的最新一条快照。
+
+    用 id 聚合在 SQL 中筛出每个仓库最后一条，避免把所有历史行加载到 Python；
+    (source, repo_id, id) 索引可覆盖 GROUP BY。
+    """
     rows = conn.execute(
-        "SELECT source, repo_id, downloads, likes, fetched_at "
-        "FROM download_metrics ORDER BY id"
+        """SELECT d.source, d.repo_id, d.downloads, d.likes, d.fetched_at
+           FROM download_metrics d
+           JOIN (
+               SELECT source, repo_id, MAX(id) AS max_id
+               FROM download_metrics
+               GROUP BY source, repo_id
+           ) latest ON latest.max_id = d.id"""
     ).fetchall()
-    latest: dict[tuple[str, str], dict] = {}
-    for row in rows:
-        latest[(row["source"], row["repo_id"])] = dict(row)
-    return latest
+    return {
+        (row["source"], row["repo_id"]): dict(row)
+        for row in rows
+    }
 
 
 def repo_url(source: str, repo_id: str, cfg: Optional[dict] = None) -> Optional[str]:

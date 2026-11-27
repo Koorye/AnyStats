@@ -17,6 +17,7 @@ from sqlite3 import Connection
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from .. import crud
+from ..cache import cached
 from ..collectors.github import ensure_issues_cached
 from ..config import SOURCE_LABELS, settings
 from ..countries import COUNTRY_NAMES
@@ -28,6 +29,11 @@ from ..security import require_admin
 router = APIRouter(prefix="/api/v1")
 
 DOWNLOAD_SOURCES = ("huggingface", "modelscope")
+CACHE_TTL = 30.0
+
+
+def _cache_key(name: str, *parts) -> tuple:
+    return (name, settings.DB_PATH, *parts)
 
 
 def _github_overview(conn: Connection, *, refresh_issues: bool = False) -> dict | None:
@@ -74,8 +80,10 @@ def _download_sources(conn: Connection) -> list[dict]:
 @router.get("/stats", tags=["stats"])
 def stats_overview(conn: Connection = Depends(get_db)):
     """全站统计总览：登记、下载、论文、洞察、GitHub。"""
-    return ok(
-        {
+    data = cached(
+        _cache_key("stats.overview"),
+        CACHE_TTL,
+        lambda: {
             "submissions": crud.submissions.stats_summary(conn),
             "downloads": crud.downloads.summary(conn),
             "papers": crud.papers.stats_summary(conn) if settings.source_active("paper") else None,
@@ -83,14 +91,20 @@ def stats_overview(conn: Connection = Depends(get_db)):
             "github": _github_overview(conn),
             "sources": settings.public_info()["sources"],
             "sync": settings.sync_summary(),
-        }
+        },
     )
+    return ok(data)
 
 
 @router.get("/stats/submissions", tags=["stats"])
 def stats_submissions(conn: Connection = Depends(get_db)):
     """登记统计：主体/单位去重、国家、机构类型、版本、月度趋势。"""
-    return ok(crud.submissions.stats_summary(conn))
+    data = cached(
+        _cache_key("stats.submissions"),
+        CACHE_TTL,
+        lambda: crud.submissions.stats_summary(conn),
+    )
+    return ok(data)
 
 
 @router.get("/stats/downloads", tags=["stats"])
@@ -99,30 +113,40 @@ def stats_downloads(
     conn: Connection = Depends(get_db),
 ):
     """下载统计：总览 + 各渠道最新值 + 每日趋势。"""
-    return ok(
-        {
+    data = cached(
+        _cache_key("stats.downloads", days),
+        CACHE_TTL,
+        lambda: {
             "summary": crud.downloads.summary(conn),
             "latest": crud.downloads.latest_by_source(conn),
             "trend": {"days": days, "series": crud.downloads.trend_series(conn, days=days)},
-        }
+        },
     )
+    return ok(data)
 
 
 @router.get("/stats/papers", tags=["stats"])
 def stats_papers(conn: Connection = Depends(get_db)):
     """论文统计：引用数、年份、期刊、Top 被引、快照 + 全文洞察汇总。"""
-    data = crud.papers.stats_summary(conn)
-    data["insights"] = crud.papers.insights_summary(conn)
+    data = cached(
+        _cache_key("stats.papers"),
+        CACHE_TTL,
+        lambda: {
+            **crud.papers.stats_summary(conn),
+            "insights": crud.papers.insights_summary(conn),
+        },
+    )
     return ok(data)
 
 
 @router.get("/stats/github", tags=["stats"])
 def stats_github(conn: Connection = Depends(get_db)):
     """GitHub 统计：仓库最新指标 + issues 数 + 每日快照。"""
-    overview = _github_overview(conn)
-    return ok(
-        {
-            "repo": overview,
+    data = cached(
+        _cache_key("stats.github"),
+        CACHE_TTL,
+        lambda: {
+            "repo": _github_overview(conn),
             "issues": crud.github.list_issues(
                 conn,
                 (settings.SOURCES.get("github") or {}).get("repo") or "",
@@ -132,8 +156,9 @@ def stats_github(conn: Connection = Depends(get_db)):
             "snapshots": crud.github.snapshots(
                 conn, (settings.SOURCES.get("github") or {}).get("repo")
             ),
-        }
+        },
     )
+    return ok(data)
 
 
 # ---------------------------------------------------------------- 登记
@@ -210,8 +235,10 @@ def downloads_list(
     conn: Connection = Depends(get_db),
 ):
     """公开：按仓库获取最新下载量（过滤 / 分页 / 按下载量倒序）。"""
-    return ok(
-        crud.downloads.download_info(
+    data = cached(
+        _cache_key("downloads.list", source, q, repo_id, page, page_size),
+        CACHE_TTL,
+        lambda: crud.downloads.download_info(
             conn,
             settings.SOURCES,
             source=source,
@@ -219,20 +246,31 @@ def downloads_list(
             repo_id=repo_id,
             page=page,
             page_size=page_size,
-        )
+        ),
     )
+    return ok(data)
 
 
 @router.get("/downloads/sources", tags=["downloads"])
 def downloads_sources(conn: Connection = Depends(get_db)):
     """公开：各下载渠道的仓库数、累计下载与最近采集时间。"""
-    return ok({"items": _download_sources(conn)})
+    data = cached(
+        _cache_key("downloads.sources"),
+        CACHE_TTL,
+        lambda: {"items": _download_sources(conn)},
+    )
+    return ok(data)
 
 
 @router.get("/downloads/summary", tags=["downloads"])
 def downloads_summary(conn: Connection = Depends(get_db)):
     """公开：全站下载总览（渠道、仓库数、下载量、更新时间）。"""
-    return ok(crud.downloads.summary(conn))
+    data = cached(
+        _cache_key("downloads.summary"),
+        CACHE_TTL,
+        lambda: crud.downloads.summary(conn),
+    )
+    return ok(data)
 
 
 @router.get("/downloads/trend", tags=["downloads"])
@@ -241,13 +279,16 @@ def downloads_trend(
     conn: Connection = Depends(get_db),
 ):
     """公开：各渠道每日累计下载趋势。"""
-    return ok(
-        {
+    data = cached(
+        _cache_key("downloads.trend", days),
+        CACHE_TTL,
+        lambda: {
             "days": days,
             "latest": crud.downloads.latest_by_source(conn),
             "series": crud.downloads.trend_series(conn, days=days),
-        }
+        },
     )
+    return ok(data)
 
 
 @router.get("/downloads/metrics", tags=["downloads"])

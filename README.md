@@ -332,6 +332,13 @@ sources:
 
 > 兼容别名（仍然可用，但保留旧的响应结构；新代码请使用上表的规范 URL）：`/api/v1/stats/summary`、`/api/v1/stats/downloads`、`/api/v1/stats/export`、`/api/v1/download-sources`、`/api/v1/downloads/info`、`/api/v1/admin/sync`。
 
+## 性能说明
+
+- 下载列表/渠道/总览/趋势、全站统计和面板聚合默认使用 **30 秒进程内 TTL 缓存**；同一时刻的并发请求只回源一次。
+- SQLite 使用 WAL，每个请求独立连接；JSON 响应超过 1 KB 自动 GZip。
+- 前端画下载曲线建议轮询 `/api/v1/downloads/trend`（约 6 KB / 90 天），不要拉 `/api/v1/dashboard`（约 480 KB）。
+- 轮询间隔建议 30–60 秒；曲线数据每天才更新一次，没必要更频繁。
+
 ## 手动采集 / 定时任务
 
 服务内置每日采集（`sync` 配置），一般无需额外配置。若希望用 cron / systemd timer：
